@@ -42,6 +42,22 @@ button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padd
 #settings .row{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
 .small{font-size:12px;color:var(--dim)}
 .pill{font-size:11px;background:var(--chip);padding:2px 8px;border-radius:99px;color:var(--dim)}
+.gal{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.gal figure{margin:0;width:calc(33% - 6px);min-width:140px}
+.gal img{width:100%;border-radius:8px;background:#fff;cursor:pointer}
+.gal figcaption{font-size:11px;color:var(--dim);line-height:1.3}
+.act{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+.act button{background:var(--chip);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:4px 9px;font-size:12px;cursor:pointer}
+#deck{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:9}
+#deck .box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(640px,94vw);max-height:86vh;overflow:auto}
+.card{border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)}
+.card .q{font-weight:600;margin-bottom:6px}
+.card .a{border-left:3px solid var(--acc);padding-left:10px;color:var(--fg);white-space:pre-wrap}
+.card .g{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.card .g button{background:var(--chip);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer}
+.card img{max-width:220px;border-radius:6px;margin-top:8px;background:#fff}
+#pageview{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;justify-content:center;z-index:10}
+#pageview img{max-width:96vw;max-height:96vh;background:#fff}
 </style>
 </head>
 <body>
@@ -49,6 +65,7 @@ button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padd
   <b>JEE Notes RAG</b>
   <span class="pill" id="statpill">…</span>
   <span class="sub">Ambarish Sir notes · LaTeX rendered · <a href="https://www.youtube.com/@ambarishphysics" target="_blank" style="color:var(--dim)">credit</a></span>
+  <button onclick="openDeck()">🃏 Doubt Deck <span class="pill" id="duen">0</span></button>
   <button onclick="openSettings()">⚙ Settings</button>
 </header>
 <main id="log"></main>
@@ -56,6 +73,7 @@ button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padd
   <div class="inrow">
     <textarea id="q" placeholder="Ask anything from your notes… e.g. cone of static friction"></textarea>
     <button class="send" onclick="ask()">Ask</button>
+    <button class="send" style="background:var(--chip);color:var(--fg)" onclick="figures()">🖼</button>
   </div>
 </footer>
 
@@ -68,9 +86,19 @@ button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padd
   <div class="row"><button onclick="closeSettings()">Cancel</button><button class="send" onclick="saveSettings()">Save</button></div>
 </div></div>
 
+<div id="deck"><div class="box">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <b>🃏 Doubt Deck</b><span class="small" id="deckstats"></span>
+    <button onclick="closeDeck()">Close</button>
+  </div>
+  <div class="small" style="margin-top:6px">Cards you saved from answers, scheduled by SM-2. Grade what you recall: 0-2 forgot, 3 hard, 4 good, 5 easy.</div>
+  <div id="decklist"></div>
+</div></div>
+<div id="pageview" onclick="this.style.display='none'"><img id="pageimg" alt="note page"></div>
+
 <script>
 const log = document.getElementById('log');
-let history = [];
+let history = [], lastCtx = null;
 marked && (marked.setOptions({breaks:true}));
 
 function el(cls, html){const d=document.createElement('div');d.className=cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
@@ -95,18 +123,63 @@ async function ask(){
       const m=ev.match(/^event: (\w+)\ndata: (.*)$/s);if(!m)continue;
       const d=JSON.parse(m[2]);
       if(m[1]==='context'){
+        lastCtx=d;
         ctxHtml='<div class="ctx"><details><summary>📄 '+d.passages.length+' passages from your notes</summary>'+
           d.passages.map(p=>'<div class="srcs"><span class="src">'+p.file+' · p.'+p.page+' · '+p.topic+'</span></div><div>'+p.text.slice(0,400).replace(/</g,'&lt;')+'…</div>').join('')+
           '</details>'+(d.diagrams.length?'<div>'+d.diagrams.map(g=>'<img src="'+g.url+'" alt="diagram p.'+g.page+' ('+g.file+')"><div class="small">diagram · '+g.file+' p.'+g.page+'</div>').join('')+'</div>':'')+'</div>';
         if(!answer)pump();
       }else if(m[1]==='delta'){answer+=d.t;pump();}
       else if(m[1]==='no_llm'||m[1]==='error'){answer=answer||'';ctxHtml+='<div class="small">'+(d.message||'')+'</div>';pump();}
-      else if(m[1]==='done'){pump();history.push({role:'user',content:text});history.push({role:'assistant',content:answer});}
+      else if(m[1]==='done'){
+        pump();history.push({role:'user',content:text});history.push({role:'assistant',content:answer});
+        if(answer&&lastCtx){
+          const g=lastCtx.diagrams&&lastCtx.diagrams[0];
+          const act=document.createElement('div');act.className='act';
+          act.innerHTML='<button>🃏 Save to Deck</button>'+(g?'<button>📄 Open p.'+g.page+'</button>':'');
+          act.children[0].onclick=()=>saveCard(text,answer,g?g.file:null,g?g.page:null,g?g.path:null,g?g.topic:null);
+          if(g)act.children[1].onclick=()=>showPage(g.file,g.page);
+          box.appendChild(act);
+        }
+      }
     }
   }
 }
 document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
 
+function showPage(file,page){pageimg.src='/pdfpage/'+encodeURIComponent(file)+'/'+page+'.png';document.getElementById('pageview').style.display='flex'}
+function saveCard(q,a,file,page,diagram,topic){
+  fetch('/api/cards',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({question:q,answer:a,file,page,diagram,topic})})
+    .then(r=>r.json()).then(()=>{refreshDeckCount();alert('Saved to Doubt Deck — review it tomorrow.')});
+}
+async function figures(){
+  const q=document.getElementById('q');const text=q.value.trim();if(!text)return;
+  q.value='';el('msg user','🖼 '+text.replace(/</g,'&lt;'));
+  const box=el('msg assistant','<span class="small">searching figures…</span>');
+  const d=await(await fetch('/api/diagrams?q='+encodeURIComponent(text))).json();
+  box.innerHTML=d.diagrams.length?('<div class="small">'+d.diagrams.length+' figures</div><div class="gal">'+
+    d.diagrams.map(g=>'<figure><img src="'+g.url+'" onclick="showPage('+JSON.stringify(g.file).replace(/"/g,'&quot;')+','+g.page+')" alt="figure"><figcaption>'+g.file+' · p.'+g.page+'<br>'+(g.caption||'').slice(0,90)+'</figcaption></figure>').join('')+'</div>')
+    :'<span class="small">no figures matched — run python -m jeerag.caption first</span>';
+}
+async function openDeck(){
+  document.getElementById('deck').style.display='flex';
+  const d=await(await fetch('/api/cards')).json();
+  document.getElementById('deckstats').textContent=d.stats.total+' cards · '+d.stats.due_today+' due · '+d.stats.mature+' mature';
+  const list=document.getElementById('decklist');
+  if(!d.due.length){list.innerHTML='<div class="small" style="margin-top:12px">Nothing due. Save answers with “🃏 Save” under any reply.</div>';return}
+  list.innerHTML=d.due.map(c=>'<div class="card"><div class="q">'+(c.question||'').replace(/</g,'&lt;')+'</div>'+
+    '<div class="a">'+marked.parse(c.answer||'')+'</div>'+
+    (c.diagram?'<img src="/'+c.diagram+'" onclick="showPage('+JSON.stringify(c.file).replace(/"/g,'&quot;')+','+c.page+')">':'')+
+    '<div class="small">'+(c.file?c.file+' · p.'+c.page:'')+(c.topic?' · '+c.topic:'')+'</div>'+
+    '<div class="g">'+[0,2,3,4,5].map(sc=>'<button onclick="grade('+c.id+','+sc+')">'+(sc<3?'forgot':sc===3?'hard':sc===4?'good':'easy')+'</button>').join('')+'</div></div>').join('');
+  math(list);
+}
+function closeDeck(){document.getElementById('deck').style.display='none'}
+async function grade(id,score){
+  await fetch('/api/cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'grade',id,score})});
+  openDeck();
+}
+async function refreshDeckCount(){try{const d=await(await fetch('/api/cards')).json();document.getElementById('duen').textContent=d.stats.due_today}catch(e){}}
 async function openSettings(){close0();const c=await(await fetch('/api/config')).json();
   s_base.value=c.llm_base_url||'';s_model.value=c.llm_model||'';s_key.value=c.llm_api_key_set?'(saved ••••••)':'';
   document.getElementById('settings').style.display='flex'}
@@ -118,7 +191,8 @@ async function saveSettings(){
   await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   close0()}
 (async()=>{try{const s=await(await fetch('/api/stats')).json();
-  statpill.textContent=s.files+' PDFs · '+s.pages+' pages · '+s.diagrams+' diagrams'}catch(e){statpill.textContent='offline'}})();
+  statpill.textContent=s.files+' PDFs · '+s.pages+' pages · '+s.diagrams+' diagrams'}catch(e){statpill.textContent='offline'}
+  refreshDeckCount()})();
 </script>
 </body>
 </html>

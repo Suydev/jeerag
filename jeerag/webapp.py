@@ -1,4 +1,5 @@
 """Localhost web chat UI over the notes RAG. Run: python -m jeerag.webapp"""
+import collections
 import json
 import mimetypes
 import re
@@ -11,6 +12,49 @@ from . import config, retrieve
 
 STATIC = Path(__file__).parent / "static"
 DATA_DIR = Path(config.load()["data_dir"])
+
+# --- rendered PDF pages: bounded in-memory LRU (never touches disk) ----------
+PAGE_DPI = 120
+PAGE_CACHE_MAX = 50
+_page_cache = collections.OrderedDict()
+_page_lock = threading.Lock()
+
+
+def pdf_path_for(name):
+    """Resolve an indexed PDF by file name (absolute path, else notes_dir)."""
+    con = retrieve.connect()
+    row = con.execute("SELECT path FROM files WHERE file=?", (name,)).fetchone()
+    con.close()
+    if row and row["path"]:
+        p = Path(row["path"])
+        if p.exists():
+            return p
+    p = Path(config.load()["notes_dir"]) / name
+    return p if p.exists() else None
+
+
+def render_page(name, page, dpi=PAGE_DPI):
+    """PNG bytes of a 1-based page, cached in RAM (max PAGE_CACHE_MAX pages)."""
+    key = (name, page, dpi)
+    with _page_lock:
+        hit = _page_cache.get(key)
+        if hit is not None:
+            _page_cache.move_to_end(key)
+            return hit
+    pdf = pdf_path_for(name)
+    if not pdf:
+        return None
+    import fitz
+    with fitz.open(pdf) as doc:
+        if not (1 <= page <= doc.page_count):
+            return None
+        pix = doc[page - 1].get_pixmap(dpi=dpi, colorspace=fitz.csRGB)
+        png = pix.tobytes("png")
+    with _page_lock:
+        _page_cache[key] = png
+        while len(_page_cache) > PAGE_CACHE_MAX:
+            _page_cache.popitem(last=False)
+    return png
 
 SYSTEM_PROMPT = (
     "You are a JEE (IIT-JEE Advanced/Main) tutor. Answer ONLY from the provided "
@@ -63,8 +107,37 @@ class Handler(BaseHTTPRequestHandler):
             self._json(cfg)
         elif u.path == "/api/search":
             q = parse_qs(u.query).get("q", [""])[0]
-            self._json({"passages": retrieve.search(q),
-                        "diagrams": retrieve.diagrams_for(retrieve.search(q, 4))})
+            hits = retrieve.search(q)
+            self._json({"passages": hits, "diagrams": retrieve.diagrams_for(hits)})
+        elif u.path == "/api/diagrams":
+            q = parse_qs(u.query).get("q", [""])[0]
+            try:
+                from . import caption
+                self._json({"diagrams": caption.search(q)})
+            except Exception as e:
+                self._json({"diagrams": [], "error": f"{type(e).__name__}: {e}"})
+        elif u.path == "/api/cards":
+            from . import review
+            self._json({"due": review.due(), "stats": review.stats()})
+        elif u.path.startswith("/pdfpage/"):
+            # /pdfpage/<url-encoded file>/<1-based page>.png
+            rest = u.path[len("/pdfpage/"):]
+            from urllib.parse import unquote
+            fname, _, tail = rest.rpartition("/")
+            fname = unquote(fname)
+            m = re.match(r"^(\d+)\.png$", tail)
+            if not m:
+                self.send_error(404)
+                return
+            png = render_page(fname, int(m.group(1)))
+            if png is None:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png)))
+            self.end_headers()
+            self.wfile.write(png)
         elif u.path.startswith("/static/"):
             p = (STATIC / u.path[len("/static/"):]).resolve()
             if not str(p).startswith(str(STATIC.resolve())):
@@ -94,10 +167,26 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         if u.path == "/api/config":
+            allowed = ("llm_base_url", "llm_model", "llm_api_key", "llm_keys",
+                       "llm_vision_model", "top_k", "port", "spaced_repeat")
             updates = {k: v for k, v in body.items()
-                       if k in ("llm_base_url", "llm_model", "llm_api_key", "top_k", "port")
-                       and not (k == "llm_api_key" and "…" in str(v))}
+                       if k in allowed
+                       and not (k in ("llm_api_key", "llm_keys") and "…" in str(v))}
             self._json({"ok": True, **config.save(updates)})
+        elif u.path == "/api/cards":
+            from . import review
+            try:
+                if str(body.get("action", "add")) == "grade":
+                    self._json({"ok": True, "card": review.grade(
+                        int(body["id"]), int(body.get("score", 4)))})
+                else:
+                    cid = review.add(str(body.get("question", ""))[:500],
+                                     str(body.get("answer", ""))[:4000],
+                                     body.get("file"), body.get("page"),
+                                     body.get("diagram"), body.get("topic"))
+                    self._json({"ok": True, "id": cid})
+            except Exception as e:
+                self._json({"ok": False, "error": f"{type(e).__name__}: {e}"}, 400)
         elif u.path == "/api/chat":
             self.chat_stream(body)
         else:
