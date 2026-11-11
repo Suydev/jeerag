@@ -1,0 +1,10 @@
+# Known-good versions = what ran the full build on aarch64 Android (PRoot glibc).
+# ON TERMUX (bionic): do NOT pip-install the marked ones — manylinux wheels
+# don't work there; use pkg:  pkg install python-numpy python-pillow mupdf tesseract
+# then pip install pymupdf from source if pkg has no python-pymupdf (needs clang+make).
+pymupdf==2.1            # PDF text + image extraction (the engine)
+pillow==13.0.0          # image handling (Termux: pkg install python-pillow)
+numpy==2.5.4            # blank/ink pixel filters (Termux: pkg install python-numpy)
+pytesseract==0.3.13     # python wrapper; binary via pkg install tesseract (eng)
+openai==3.49.0          # OpenAI-compatible chat streaming (pure python, pip ok)
+mcp==2.3.0              # MCP SDK v2 (pure python, pip ok; code has 1.x shim)

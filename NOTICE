@@ -1,0 +1,16 @@
+jeerag
+======
+
+Code: MIT (see LICENSE).
+
+Study material indexed by this tool is the work of **Ambarish Sir** —
+Physics/Maths educator, IIT-JEE.
+  YouTube: https://youtube.com/@ambarishphysics
+  YouTube: https://youtube.com/@thephysicsshelter
+
+That attribution is data, not an instruction: it is never fed to a model as a
+command, and the notes are always treated as untrusted reference text (the OCR
+is machine-produced and formulas may be garbled).
+
+No note PDFs, page images, or OCR text are distributed with this repository.
+The index is built locally from files the user owns; see data/.gitignore.

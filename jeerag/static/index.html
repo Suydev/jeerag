@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JEE Notes RAG — Ambarish Sir</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+      integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+        integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
+        integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--border:#2a2f3a;--fg:#e6e8ee;--dim:#9aa3b2;--acc:#5eead4;--chip:#22303a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
+header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--panel)}
+header b{font-size:16px}
+header .sub{color:var(--dim);font-size:12px;flex:1}
+header button{background:var(--chip);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer}
+main{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;max-width:900px;width:100%;margin:0 auto}
+.msg{padding:12px 14px;border-radius:12px;white-space:normal;overflow-wrap:break-word}
+.msg.user{background:#1c2733;align-self:flex-end;max-width:85%}
+.msg.assistant{background:var(--panel);border:1px solid var(--border);align-self:flex-start;max-width:100%}
+.msg.assistant table{border-collapse:collapse;margin:8px 0}
+.msg.assistant th,.msg.assistant td{border:1px solid var(--border);padding:4px 10px}
+.msg.assistant img{max-width:100%;border-radius:8px;margin:6px 0;background:#fff}
+.msg.assistant pre{background:#0b0d11;padding:10px;border-radius:8px;overflow-x:auto}
+.srcs{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.src{background:var(--chip);border-radius:6px;padding:2px 8px;font-size:12px;color:var(--acc)}
+.ctx{margin-top:8px;font-size:13px;color:var(--dim)}
+.ctx details{margin:4px 0}
+.ctx summary{cursor:pointer;color:var(--fg)}
+footer{padding:12px 14px;border-top:1px solid var(--border);background:var(--panel)}
+.inrow{display:flex;gap:8px;max-width:900px;margin:0 auto;width:100%}
+textarea{flex:1;resize:none;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;height:52px}
+button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padding:0 18px;font-weight:600;cursor:pointer}
+#settings{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:9}
+#settings .box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(480px,92vw)}
+#settings label{display:block;font-size:13px;color:var(--dim);margin:10px 0 4px}
+#settings input{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px;font:inherit}
+#settings .row{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+.small{font-size:12px;color:var(--dim)}
+.pill{font-size:11px;background:var(--chip);padding:2px 8px;border-radius:99px;color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <b>JEE Notes RAG</b>
+  <span class="pill" id="statpill">…</span>
+  <span class="sub">Ambarish Sir notes · LaTeX rendered · <a href="https://www.youtube.com/@ambarishphysics" target="_blank" style="color:var(--dim)">credit</a></span>
+  <button onclick="openSettings()">⚙ Settings</button>
+</header>
+<main id="log"></main>
+<footer>
+  <div class="inrow">
+    <textarea id="q" placeholder="Ask anything from your notes… e.g. cone of static friction"></textarea>
+    <button class="send" onclick="ask()">Ask</button>
+  </div>
+</footer>
+
+<div id="settings"><div class="box">
+  <b>LLM endpoint (OpenAI-compatible)</b>
+  <label>Base URL <span class="small">e.g. http://127.0.0.1:8787/v1 — empty = retrieval-only mode</span></label>
+  <input id="s_base">
+  <label>Model</label><input id="s_model" placeholder="gpt-4o-mini">
+  <label>API key</label><input id="s_key" type="password">
+  <div class="row"><button onclick="closeSettings()">Cancel</button><button class="send" onclick="saveSettings()">Save</button></div>
+</div></div>
+
+<script>
+const log = document.getElementById('log');
+let history = [];
+marked && (marked.setOptions({breaks:true}));
+
+function el(cls, html){const d=document.createElement('div');d.className=cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function math(d){renderMathInElement(d,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],throwOnError:false})}
+
+async function ask(){
+  const q=document.getElementById('q');const text=q.value.trim();if(!text)return;
+  q.value='';el('msg user',text.replace(/</g,'&lt;'));
+  const box=el('msg assistant','<span class="small">searching notes…</span>');
+  const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:text,history})});
+  const reader=res.body.getReader();const dec=new TextDecoder();let buf='',answer='',ctxHtml='';
+  const pump=()=>{
+    box.innerHTML=(answer?marked.parse(answer):'<span class="small">no LLM answer — see retrieved passages below</span>')+ctxHtml;
+    math(box);log.scrollTop=log.scrollHeight;
+  };
+  while(true){
+    const{value,done}=await reader.read();if(done)break;
+    buf+=dec.decode(value,{stream:true});
+    let i;
+    while((i=buf.indexOf('\n\n'))>=0){
+      const ev=buf.slice(0,i);buf=buf.slice(i+2);
+      const m=ev.match(/^event: (\w+)\ndata: (.*)$/s);if(!m)continue;
+      const d=JSON.parse(m[2]);
+      if(m[1]==='context'){
+        ctxHtml='<div class="ctx"><details><summary>📄 '+d.passages.length+' passages from your notes</summary>'+
+          d.passages.map(p=>'<div class="srcs"><span class="src">'+p.file+' · p.'+p.page+' · '+p.topic+'</span></div><div>'+p.text.slice(0,400).replace(/</g,'&lt;')+'…</div>').join('')+
+          '</details>'+(d.diagrams.length?'<div>'+d.diagrams.map(g=>'<img src="'+g.url+'" alt="diagram p.'+g.page+' ('+g.file+')"><div class="small">diagram · '+g.file+' p.'+g.page+'</div>').join('')+'</div>':'')+'</div>';
+        if(!answer)pump();
+      }else if(m[1]==='delta'){answer+=d.t;pump();}
+      else if(m[1]==='no_llm'||m[1]==='error'){answer=answer||'';ctxHtml+='<div class="small">'+(d.message||'')+'</div>';pump();}
+      else if(m[1]==='done'){pump();history.push({role:'user',content:text});history.push({role:'assistant',content:answer});}
+    }
+  }
+}
+document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
+
+async function openSettings(){close0();const c=await(await fetch('/api/config')).json();
+  s_base.value=c.llm_base_url||'';s_model.value=c.llm_model||'';s_key.value=c.llm_api_key_set?'(saved ••••••)':'';
+  document.getElementById('settings').style.display='flex'}
+function close0(){document.getElementById('settings').style.display='none'}
+const closeSettings=close0;
+async function saveSettings(){
+  const body={llm_base_url:s_base.value.trim(),llm_model:s_model.value.trim()};
+  if(s_key.value&&!s_key.value.startsWith('(saved'))body.llm_api_key=s_key.value.trim();
+  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  close0()}
+(async()=>{try{const s=await(await fetch('/api/stats')).json();
+  statpill.textContent=s.files+' PDFs · '+s.pages+' pages · '+s.diagrams+' diagrams'}catch(e){statpill.textContent='offline'}})();
+</script>
+</body>
+</html>

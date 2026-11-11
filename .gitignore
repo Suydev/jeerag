@@ -1,0 +1,7 @@
+*.db-journal
+*.log
+.claude/
+.venv/
+__pycache__/
+config.json
+data/
