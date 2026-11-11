@@ -5,3 +5,16 @@ config.json
 *.pem
 # transient sqlite artifact (would commit a torn db pair if caught mid-write)
 *.db-journal
+
+# local runtime
+deep .run/
+# session backup
+deep full compacted/
+# private user notes data
+deep notes/
+.run/
+full compacted/
+notes/
+
+# GitHub 100MB file limit
+papers/jee-adv/Books/

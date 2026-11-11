@@ -46,8 +46,8 @@ def _diagram_abs(path: str) -> Path:
     return p
 
 
-def t_search_notes(query: str, k: int = 8):
-    hits = retrieve.search(query, k)
+def t_search_notes(query: str, k: int = 8, kind: str | None = None):
+    hits = retrieve.search(query, k, kind=kind)
     return {"passages": hits, "diagrams": retrieve.diagrams_for(hits)}
 
 
@@ -84,7 +84,8 @@ TOOLS = {
                        "for those pages.",
         "schema": {"type": "object", "properties": {
             "query": {"type": "string", "description": "search terms"},
-            "k": {"type": "integer", "default": 8, "description": "how many passages"}},
+            "k": {"type": "integer", "default": 8, "description": "how many passages"},
+            "kind": {"type": "string", "description": "filter by kind: 'notes' or 'pyq'"}},
             "required": ["query"]},
     },
     "search_diagrams": {

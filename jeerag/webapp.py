@@ -98,7 +98,8 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/stats":
             self._json(retrieve.stats())
         elif u.path == "/api/topics":
-            self._json(retrieve.topics())
+            kind = parse_qs(u.query).get("kind", [None])[0]
+            self._json(retrieve.topics(kind=kind))
         elif u.path == "/api/config":
             cfg = config.load()
             key = cfg.get("llm_api_key") or ""
@@ -107,7 +108,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(cfg)
         elif u.path == "/api/search":
             q = parse_qs(u.query).get("q", [""])[0]
-            hits = retrieve.search(q)
+            kind = parse_qs(u.query).get("kind", [None])[0]
+            hits = retrieve.search(q, kind=kind)
             self._json({"passages": hits, "diagrams": retrieve.diagrams_for(hits)})
         elif u.path == "/api/diagrams":
             q = parse_qs(u.query).get("q", [""])[0]

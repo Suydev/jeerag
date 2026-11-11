@@ -1,0 +1,68 @@
+name: Index JEE PYQ papers
+
+on:
+  push:
+    paths:
+      - 'papers/**'
+      - 'jeerag/index.py'
+      - 'jeerag/retrieve.py'
+      - 'jeerag/mcp_server.py'
+      - 'jeerag/webapp.py'
+      - 'jeerag/config.py'
+      - '.github/workflows/index.yml'
+  workflow_dispatch:
+
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y tesseract-ocr poppler-utils libgl1-mesa-glx
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pymupdf numpy pillow pytesseract
+
+      - name: Index JEE Main papers (pyq)
+        env:
+          JEERAG_NOTES_DIR: ${{ github.workspace }}/papers/jee-main
+        run: |
+          python -m jeerag.index --kind pyq --notes-dir papers/jee-main --recursive
+
+      - name: Index JEE Advanced papers (pyq)
+        env:
+          JEERAG_NOTES_DIR: ${{ github.workspace }}/papers/jee-adv
+        run: |
+          python -m jeerag.index --kind pyq --notes-dir papers/jee-adv --recursive
+
+      - name: Show index stats
+        env:
+          JEERAG_NOTES_DIR: ${{ github.workspace }}/papers/jee-main
+        run: |
+          python -c "
+          import sys; sys.path.insert(0, '.')
+          from jeerag import retrieve
+          print(retrieve.stats())
+          "
+
+      - name: Commit index and diagrams
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/index.db data/diagrams/ papers/
+          git commit -m "Build index from JEE PYQ papers (${{ github.sha }})" || echo "nothing to commit"
+          git push

@@ -14,6 +14,11 @@ def db_path():
 def connect():
     con = sqlite3.connect(db_path(), timeout=30)
     con.row_factory = sqlite3.Row
+    # Migration: add kind column to existing files tables that lack it
+    cols = {r[1] for r in con.execute("PRAGMA table_info(files)")}
+    if "kind" not in cols:
+        con.execute("ALTER TABLE files ADD COLUMN kind TEXT DEFAULT 'notes'")
+        con.commit()
     return con
 
 
@@ -28,24 +33,30 @@ def sanitize_query(q: str) -> str:
     return " OR ".join(f'"{t}"' for t in dict.fromkeys(terms))
 
 
-def search(question: str, k: int | None = None):
+def search(question: str, k: int | None = None, kind: str | None = None):
     cfg = config.load()
     k = k or cfg["top_k"]
     con = connect()
     q = sanitize_query(question)
     hits = []
+    kind_clause = " AND f.kind = ?" if kind else ""
+    kind_params = ([kind] if kind else [])
     try:
         hits = [dict(r) for r in con.execute(
-            """SELECT text, topic, subject, file, page, bm25(chunks) AS score
-               FROM chunks WHERE chunks MATCH ? ORDER BY score LIMIT ?""", (q, k))]
+            f"""SELECT c.text, c.topic, c.subject, c.file, c.page, bm25(chunks) AS score
+               FROM chunks c JOIN files f ON c.file = f.file
+               WHERE chunks MATCH ?{kind_clause} ORDER BY score LIMIT ?""",
+            (q, *kind_params, k))]
     except sqlite3.OperationalError:
         pass
     if len(hits) < 3:  # topic-name fallback
         first = (re.findall(r"[A-Za-z]{4,}", question) or [""])[0]
+        params = [f"%{first}%", k] + kind_params
         extra = [dict(r) for r in con.execute(
-            """SELECT c.text, c.topic, c.subject, c.file, c.page, -9.0 AS score
+            f"""SELECT c.text, c.topic, c.subject, c.file, c.page, -9.0 AS score
                FROM chunks c JOIN files f ON c.file = f.file
-               WHERE f.topic LIKE ? LIMIT ?""", (f"%{first}%", k))]
+               WHERE f.topic LIKE ?{kind_clause} LIMIT ?""",
+            tuple(params))]
         seen = {(h["file"], h["page"]) for h in hits}
         hits += [e for e in extra if (e["file"], e["page"]) not in seen]
     con.close()
@@ -115,11 +126,13 @@ def page_text(file: str, page: int):
             "diagrams": [{"path": d["path"], "url": "/" + _rel(d["path"])} for d in diags]}
 
 
-def topics():
+def topics(kind: str | None = None):
     con = connect()
+    kind_clause = " WHERE kind = ?" if kind else ""
+    params = (kind,) if kind else ()
     rows = [dict(r) for r in con.execute(
-        "SELECT file, chapter, topic, subject, pages, text_pages, ocr_pages FROM files "
-        "ORDER BY CAST(chapter AS INT)")]
+        f"SELECT file, chapter, topic, subject, kind, pages, text_pages, ocr_pages FROM files {kind_clause} "
+        "ORDER BY CAST(chapter AS INT)", params)]
     con.close()
     return rows
 
@@ -132,6 +145,8 @@ def stats():
         "chunks": con.execute("SELECT COUNT(*) c FROM chunks").fetchone()["c"],
         "diagrams": con.execute("SELECT COUNT(*) c FROM diagrams").fetchone()["c"],
         "notes_dir": config.load()["notes_dir"],
+        "by_kind": [dict(r) for r in con.execute(
+            "SELECT kind, COUNT(*) c FROM files GROUP BY kind")],
     }
     con.close()
     return out

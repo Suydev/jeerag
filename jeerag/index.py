@@ -24,6 +24,7 @@ DIAGRAM_DIR = DATA_DIR / "diagrams"
 OCR_DPI = int(os.environ.get("JEERAG_DPI", "200"))
 WORKERS = int(os.environ.get("JEERAG_WORKERS", "4"))
 MIN_CHARS_FOR_TEXT_LAYER = 30  # below this a page counts as a scan
+DEFAULT_KIND = os.environ.get("JEERAG_DEFAULT_KIND", "notes")
 
 PHYSICS_WORDS = {
     "PRE CALCULUS": "maths", "DIFFERENTIATION": "maths", "APPLICATION OF DERIVATIVES": "maths",
@@ -43,10 +44,22 @@ PHYSICS_WORDS = {
 }
 
 
-def tags_for(pdf_path: Path):
+def tags_for(pdf_path: Path, kind: str = DEFAULT_KIND):
     name = pdf_path.stem.upper()
-    m = re.match(r"^(\d+)[_\s]+(.+)", pdf_path.stem, re.IGNORECASE)
-    chapter, topic = (m.group(1), m.group(2)) if m else ("", pdf_path.stem)
+    stem = pdf_path.stem
+    m = re.match(r"^(\d+)[_\s]+(.+)", stem, re.IGNORECASE)
+    if m:
+        chapter, topic = m.group(1), m.group(2)
+    elif kind == "pyq":
+        # PYQ filenames like "JEE Advanced Question Paper 2007 Paper 1.pdf"
+        ym = re.search(r"(19|20)\d{2}", stem)
+        chapter = ym.group(0) if ym else ""
+        topic = re.sub(r"\s*(19|20)\d{2}\s*", " ", stem, flags=re.I).strip()
+        topic = re.sub(r"\b(Paper|Shift|Set|Mock|Previous|Year|Question)\b", "", topic, flags=re.I).strip()
+        if not topic:
+            topic = stem
+    else:
+        chapter, topic = "", stem
     topic_clean = re.sub(r"\s*T\d{2}J\d+\s*(-min)?", "", topic, flags=re.I).strip()
     topic_clean = re.sub(r"[_\s]+", " ", topic_clean)
     subject = "physics"
@@ -54,6 +67,9 @@ def tags_for(pdf_path: Path):
         if word in name:
             subject = subj
             break
+    if kind == "pyq" and subject == "physics":
+        # PYQ papers span physics+chemistry+maths; mark as mixed unless a subject word wins
+        subject = "mixed"
     return chapter, topic_clean, subject
 
 
@@ -64,7 +80,7 @@ def init_db():
     con.executescript("""
     CREATE TABLE IF NOT EXISTS files(
         file TEXT PRIMARY KEY, path TEXT, chapter TEXT, topic TEXT, subject TEXT,
-        pages INTEGER, ocr_pages INTEGER, text_pages INTEGER);
+        kind TEXT DEFAULT 'notes', pages INTEGER, ocr_pages INTEGER, text_pages INTEGER);
     CREATE TABLE IF NOT EXISTS done(file TEXT, page INTEGER, PRIMARY KEY(file, page));
     CREATE TABLE IF NOT EXISTS pages(
         file TEXT, page INTEGER, source TEXT, text TEXT, n_diagrams INTEGER,
@@ -76,6 +92,10 @@ def init_db():
         text, topic, subject UNINDEXED, file UNINDEXED, page UNINDEXED,
         tokenize='unicode61');
     """)
+    # Migration: add kind column to existing files tables that lack it
+    cols = {r[1] for r in con.execute("PRAGMA table_info(files)")}
+    if "kind" not in cols:
+        con.execute("ALTER TABLE files ADD COLUMN kind TEXT DEFAULT 'notes'")
     con.commit()
     return con
 
@@ -203,11 +223,11 @@ def chunk_text(text, max_chars=2500):
     return parts
 
 
-def process_pdf(pdf_path):
+def process_pdf(pdf_path, kind: str = DEFAULT_KIND):
     con = init_db_conn()
     file = pdf_path.name
     done = {r[0] for r in con.execute("SELECT page FROM done WHERE file=?", (file,))}
-    chapter, topic, subject = tags_for(pdf_path)
+    chapter, topic, subject = tags_for(pdf_path, kind)
     slug = slug_for(pdf_path)
     doc = fitz.open(pdf_path)
     n = len(doc)
@@ -246,10 +266,10 @@ def init_db_conn():
     return sqlite3.connect(DB_PATH, timeout=60)
 
 
-def ingest_ocr_pages(pdf_path, ocr_pages):
+def ingest_ocr_pages(pdf_path, ocr_pages, kind: str = DEFAULT_KIND):
     con = init_db_conn()
     file = pdf_path.name
-    chapter, topic, subject = tags_for(pdf_path)
+    chapter, topic, subject = tags_for(pdf_path, kind)
     slug = slug_for(pdf_path)
     doc = fitz.open(pdf_path)
     for pageno, text in ocr_pages:
@@ -269,22 +289,32 @@ def ingest_ocr_pages(pdf_path, ocr_pages):
         con.execute("INSERT OR REPLACE INTO done(file, page) VALUES(?,?)", (file, pageno))
     con.commit()
     con.execute(
-        "INSERT OR REPLACE INTO files(file, path, chapter, topic, subject, pages, ocr_pages, text_pages) "
-        "SELECT ?,?,?,?,?, "
+        "INSERT OR REPLACE INTO files(file, path, chapter, topic, subject, kind, pages, ocr_pages, text_pages) "
+        "SELECT ?,?,?,?,?,?, "
         "(SELECT COUNT(*) FROM done WHERE file=?), (SELECT COUNT(*) FROM pages WHERE file=? AND source='ocr'), "
         "(SELECT COUNT(*) FROM pages WHERE file=? AND source='text')",
-        (file, str(pdf_path), chapter, topic, subject, file, file, file))
+        (file, str(pdf_path), chapter, topic, subject, kind, file, file, file))
     con.commit()
     con.close()
 
 
 def main():
-    only = sys.argv[1] if len(sys.argv) > 1 else None
+    import argparse
+    ap = argparse.ArgumentParser(description="Build/resume the jeerag FTS5 index")
+    ap.add_argument("substring", nargs="?", help="optional substring filter on PDF file names")
+    ap.add_argument("--kind", default=DEFAULT_KIND, help="kind tag for indexed files (notes|pyq)")
+    ap.add_argument("--notes-dir", default=None, help="override notes directory")
+    ap.add_argument("--recursive", action="store_true", help="search subdirectories for PDFs")
+    args = ap.parse_args()
+
+    notes_dir = Path(args.notes_dir) if args.notes_dir else NOTES_DIR
+    kind = args.kind
+    globber = notes_dir.rglob if args.recursive else notes_dir.glob
     con = init_db()
     files = sorted(
-        (p for p in NOTES_DIR.glob("*.pdf") if not only or only.lower() in p.name.lower()),
+        (p for p in globber("*.pdf") if not args.substring or args.substring.lower() in p.name.lower()),
         key=lambda p: (int(m.group(1)) if (m := re.match(r"^(\d+)", p.stem)) else 999, p.name))
-    print(f"{len(files)} PDFs, OCR dpi={OCR_DPI}, workers={WORKERS}", flush=True)
+    print(f"{len(files)} PDFs (kind={kind}) from {notes_dir}, OCR dpi={OCR_DPI}, workers={WORKERS}", flush=True)
     for pdf in files:
         done = {r[0] for r in con.execute("SELECT page FROM done WHERE file=?", (pdf.name,))}
         doc = fitz.open(pdf)
@@ -295,31 +325,32 @@ def main():
             print(f"[skip] {pdf.name}: already indexed", flush=True)
             continue
         print(f"[start] {pdf.name}: {len(todo)}/{n_total} pages pending", flush=True)
-        result = process_pdf(pdf)
+        result = process_pdf(pdf, kind)
         _, n, n_ocr = result
         if n_ocr:
-            args = [(str(pdf), p) for p in todo if True]
+            args2 = [(str(pdf), p) for p in todo if True]
             # recompute OCR set: pages still not marked done after text pass
             con2 = init_db()
             still = {r[0] for r in con2.execute("SELECT page FROM done WHERE file=?", (pdf.name,))}
             con2.close()
-            args = [(str(pdf), p) for p in todo if p not in still]
-            print(f"  ocr: {len(args)} pages", flush=True)
+            args2 = [(str(pdf), p) for p in todo if p not in still]
+            print(f"  ocr: {len(args2)} pages", flush=True)
             ocr_out = []
             with ProcessPoolExecutor(max_workers=WORKERS) as ex:
-                for i, res in enumerate(ex.map(ocr_page, args)):
+                for i, res in enumerate(ex.map(ocr_page, args2)):
                     ocr_out.append(res)
-                    if (i + 1) % 10 == 0 or i + 1 == len(args):
-                        print(f"  ocr {i + 1}/{len(args)}", flush=True)
-            ingest_ocr_pages(pdf, [(r[1], r[2]) for r in ocr_out])
+                    if (i + 1) % 10 == 0 or i + 1 == len(args2):
+                        print(f"  ocr {i + 1}/{len(args2)}", flush=True)
+            ingest_ocr_pages(pdf, [(r[1], r[2]) for r in ocr_out], kind)
         else:
+            chapter, topic, subject = tags_for(pdf, kind)
             con3 = init_db()
             con3.execute(
-                "INSERT OR REPLACE INTO files(file, path, chapter, topic, subject, pages, ocr_pages, text_pages) "
-                "SELECT ?,?,?,?,?, (SELECT COUNT(*) FROM done WHERE file=?), "
+                "INSERT OR REPLACE INTO files(file, path, chapter, topic, subject, kind, pages, ocr_pages, text_pages) "
+                "SELECT ?,?,?,?,?,?, (SELECT COUNT(*) FROM done WHERE file=?), "
                 "(SELECT COUNT(*) FROM pages WHERE file=? AND source='ocr'), "
                 "(SELECT COUNT(*) FROM pages WHERE file=? AND source='text')",
-                (pdf.name, str(pdf), *(tags_for(pdf)), pdf.name, pdf.name, pdf.name))
+                (pdf.name, str(pdf), chapter, topic, subject, kind, pdf.name, pdf.name, pdf.name))
             con3.commit()
             con3.close()
         print(f"[done] {pdf.name}", flush=True)
