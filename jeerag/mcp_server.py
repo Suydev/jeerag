@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from . import retrieve
+from . import retrieve, advanced_retrieve
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "jeerag", "version": "1.1.0"}
@@ -76,6 +76,30 @@ def t_index_stats():
     return retrieve.stats()
 
 
+def t_search_notes_advanced(query: str, k: int = 8, kind: str | None = None,
+                            mode: str = "auto"):
+    """Advanced search with agentic follow-loop (query expansion, RAG-Fusion,
+    HyDE, CRAG re-grading). Falls back to basic BM25 on error."""
+    try:
+        res = advanced_retrieve.advanced_search(
+            query, k=k, kind=kind, mode=mode, use_loop=True)
+        return {
+            "passages": res["passages"],
+            "diagrams": res["diagrams"],
+            "method": res.get("method", "advanced"),
+            "loops": res.get("loops", 1),
+            "query_variants": res.get("query_variants", []),
+            "reranked": res.get("reranked", False),
+        }
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def t_llm_health():
+    """Health check for all configured LLM endpoints (multi-LLM ensemble)."""
+    return llm_ensemble.health_all()
+
+
 TOOLS = {
     "search_notes": {
         "fn": t_search_notes,
@@ -120,6 +144,25 @@ TOOLS = {
     "index_stats": {
         "fn": t_index_stats,
         "description": "Counts of files/pages/chunks/diagrams and the notes directory.",
+        "schema": {"type": "object", "properties": {}},
+    },
+    "search_notes_advanced": {
+        "fn": t_search_notes_advanced,
+        "description": "Advanced search with agentic follow-loop: query expansion, "
+                       "RAG-Fusion multi-query + RRF, BM25-HyDE, CRAG relevance "
+                       "re-grading, context distillation, and query routing "
+                       "(notes vs pyq). Loops up to 3 times to improve results.",
+        "schema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "search terms"},
+            "k": {"type": "integer", "default": 8, "description": "how many passages"},
+            "kind": {"type": "string", "description": "filter by kind: 'notes' or 'pyq'"}},
+            "required": ["query"]},
+    },
+    "llm_health": {
+        "fn": t_llm_health,
+        "description": "Health check for every configured LLM endpoint "
+                       "(multi-LLM ensemble / 'RAG of LLMs'). Returns ok/model/reason "
+                       "for each endpoint so you can see which providers are alive.",
         "schema": {"type": "object", "properties": {}},
     },
 }

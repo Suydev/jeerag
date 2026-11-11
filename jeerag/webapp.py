@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import config, retrieve
+from . import config, retrieve, advanced_retrieve
 
 STATIC = Path(__file__).parent / "static"
 DATA_DIR = Path(config.load()["data_dir"])
@@ -197,8 +197,22 @@ class Handler(BaseHTTPRequestHandler):
     def chat_stream(self, body):
         question = str(body.get("question", ""))[:2000]
         history = body.get("history") or []
-        hits = retrieve.search(question)
-        diags = retrieve.diagrams_for(hits)
+        # --- Advanced retrieval with agentic follow-loop ---
+        cfg = config.load()
+        top_k = int(cfg.get("top_k", 8))
+        try:
+            ares = advanced_retrieve.advanced_search(
+                question, k=top_k, kind=None, mode="auto", use_loop=True)
+            hits = ares["passages"]
+            diags = ares["diagrams"]
+            method = ares.get("method", "advanced")
+            loops = ares.get("loops", 1)
+        except Exception:
+            # Fallback to basic BM25 if advanced retrieval fails
+            hits = retrieve.search(question)
+            diags = retrieve.diagrams_for(hits)
+            method = "basic_bm25"
+            loops = 1
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -211,7 +225,8 @@ class Handler(BaseHTTPRequestHandler):
             except BrokenPipeError:
                 raise SystemExit
 
-        send("context", {"passages": hits, "diagrams": diags})
+        send("context", {"passages": hits, "diagrams": diags,
+                         "method": method, "loops": loops})
         cfg = config.load()
         if not (cfg.get("llm_base_url") or "").strip():
             send("no_llm", {"message": "No LLM endpoint configured — showing "
@@ -219,8 +234,9 @@ class Handler(BaseHTTPRequestHandler):
             send("done", {})
             return
         try:
-            from . import llm
-            ctx = retrieve.build_context(hits)
+            from jeerag.llm.manager import llm_manager
+            ctx, _ = advanced_retrieve.build_advanced_context(
+                question, k=len(hits), cfg=cfg)
             diag_note = ("\n".join(f"diagram for p.{d['page']} of {d['file']}: {d['url']}"
                                    for d in diags))
             messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -229,7 +245,11 @@ class Handler(BaseHTTPRequestHandler):
                     messages.append({"role": h["role"], "content": str(h.get("content", ""))[:4000]})
             messages.append({"role": "user", "content":
                              f"NOTES EXCERPTS:\n{ctx}\n\nDIAGRAMS ON THESE PAGES:\n{diag_note}\n\nQUESTION: {question}"})
-            for delta in llm.stream_chat(messages, cfg, 0.2):
+
+            # Stream answer via LLM provider (openai, anthropic, opencode2api, ...)
+            temp = float(cfg.get("llm_temperature", 0.2))
+            mgr = llm_manager(cfg)
+            for delta in mgr.chat(messages, temp, None):
                 send("delta", {"t": delta})
             send("done", {})
         except SystemExit:

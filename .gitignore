@@ -18,3 +18,8 @@ notes/
 
 # GitHub 100MB file limit
 papers/jee-adv/Books/
+.python-version
+.env
+__pycache__/
+.python-version
+.env
