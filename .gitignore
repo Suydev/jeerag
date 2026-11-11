@@ -1,7 +1,7 @@
-*.db-journal
-*.log
-.claude/
-.venv/
-__pycache__/
+# secrets only — everything else is committed per owner request
 config.json
-data/
+.claude/
+*.key
+*.pem
+# transient sqlite artifact (would commit a torn db pair if caught mid-write)
+*.db-journal
