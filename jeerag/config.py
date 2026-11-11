@@ -13,6 +13,9 @@ DEFAULTS = {
     "llm_base_url": "",
     "llm_model": "",
     "llm_api_key": "",
+    "llm_keys": [],
+    "llm_vision_model": "",
+    "spaced_repeat": True,
 }
 
 

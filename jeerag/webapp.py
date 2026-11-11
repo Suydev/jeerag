@@ -122,15 +122,13 @@ class Handler(BaseHTTPRequestHandler):
 
         send("context", {"passages": hits, "diagrams": diags})
         cfg = config.load()
-        if not cfg.get("llm_base_url"):
+        if not (cfg.get("llm_base_url") or "").strip():
             send("no_llm", {"message": "No LLM endpoint configured — showing "
                           "retrieved passages only. Set it in ⚙ Settings."})
             send("done", {})
             return
         try:
-            from openai import OpenAI
-            client = OpenAI(base_url=cfg["llm_base_url"],
-                            api_key=cfg.get("llm_api_key") or "none")
+            from . import llm
             ctx = retrieve.build_context(hits)
             diag_note = ("\n".join(f"diagram for p.{d['page']} of {d['file']}: {d['url']}"
                                    for d in diags))
@@ -140,16 +138,8 @@ class Handler(BaseHTTPRequestHandler):
                     messages.append({"role": h["role"], "content": str(h.get("content", ""))[:4000]})
             messages.append({"role": "user", "content":
                              f"NOTES EXCERPTS:\n{ctx}\n\nDIAGRAMS ON THESE PAGES:\n{diag_note}\n\nQUESTION: {question}"})
-            stream = client.chat.completions.create(
-                model=cfg.get("llm_model") or "gpt-4o-mini",
-                messages=messages, stream=True, temperature=0.2)
-            for chunk in stream:
-                try:
-                    delta = chunk.choices[0].delta.content
-                except Exception:
-                    delta = None
-                if delta:
-                    send("delta", {"t": delta})
+            for delta in llm.stream_chat(messages, cfg, 0.2):
+                send("delta", {"t": delta})
             send("done", {})
         except SystemExit:
             raise
