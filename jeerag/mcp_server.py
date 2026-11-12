@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from . import retrieve, advanced_retrieve
+from .llm import health as llm_health
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "jeerag", "version": "1.1.0"}
@@ -121,8 +122,8 @@ def t_search_notes_advanced(query: str, k: int = 8, kind: str | None = None,
 
 
 def t_llm_health():
-    """Health check for all configured LLM endpoints (multi-LLM ensemble)."""
-    return llm_ensemble.health_all()
+    """Health check for every configured LLM endpoint (multi-LLM ensemble)."""
+    return llm_health()
 
 
 TOOLS = {
