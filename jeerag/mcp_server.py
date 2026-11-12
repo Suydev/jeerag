@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import sys
+import time
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -29,6 +30,30 @@ from . import retrieve, advanced_retrieve
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "jeerag", "version": "1.1.0"}
+
+
+# ---------------------------------------------------------------------------
+# Audit logging (structured JSON on stderr, one line per event)
+# ---------------------------------------------------------------------------
+
+def audit_log(event: str, fields: dict) -> None:
+    """Write a structured audit record to stderr.
+
+    Each record is one JSON line with a timestamp, event name, and fields.
+    Used for tool call tracking, debugging, and cost attribution.
+    """
+    record = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "event": event,
+        **fields,
+    }
+    try:
+        sys.stderr.write(json.dumps(record, ensure_ascii=False) + "\n")
+        sys.stderr.flush()
+    except Exception:
+        pass  # never break the server on audit failure
+
+
 INSTRUCTIONS = (
     "RAG over scanned JEE physics/maths notes (Ambarish Sir). Text was "
     "machine-OCR'd from page scans, so formulas may be garbled — always fetch "
@@ -169,13 +194,27 @@ TOOLS = {
 
 
 def call_tool(name, args):
-    """Run one tool, return MCP content list."""
+    """Run one tool, return MCP content list. Logs every call to the audit log."""
     spec = TOOLS.get(name)
     if not spec:
         return [{"type": "text", "text": f"unknown tool: {name}"}], True
+    t0 = time.time()
     try:
         out = spec["fn"](**(args or {}))
+        audit_log("tool_call", {
+            "tool": name,
+            "args_keys": list((args or {}).keys()),
+            "ok": True,
+            "duration_ms": round((time.time() - t0) * 1000, 1),
+        })
     except Exception as e:
+        audit_log("tool_call", {
+            "tool": name,
+            "args_keys": list((args or {}).keys()),
+            "ok": False,
+            "error": f"{type(e).__name__}: {e}",
+            "duration_ms": round((time.time() - t0) * 1000, 1),
+        })
         return [{"type": "text", "text": f"{type(e).__name__}: {e}"}], True
     if isinstance(out, dict) and "__image__" in out:
         p = out["__image__"]

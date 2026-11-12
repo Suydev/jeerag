@@ -167,6 +167,9 @@ class LLMManager:
     ) -> str:
         return "".join(self.chat(messages, temperature, max_tokens)).strip()
 
+    # legacy name used by the llm/__init__ shim and older call sites
+    stream_chat = chat
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton (built lazily from config)

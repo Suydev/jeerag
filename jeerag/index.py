@@ -206,7 +206,16 @@ def slug_for(pdf_path: Path) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", pdf_path.stem).strip("_")[:60]
 
 
-def chunk_text(text, max_chars=2500):
+def chunk_text(text, max_chars=1500, overlap_chars=150):
+    """Split text into overlapping chunks at blank-line boundaries.
+
+    Research (awesome-rag-production, RAG tutorial 2026): recursive
+    splitting at 400-512 tokens (~1200-1500 chars) with 10-20% overlap
+    is the best default; smaller chunks (200-400 tokens) generally
+    outperform larger ones. Page-level chunking is best for PDFs.
+
+    We use ~1500 chars (≈ 375 tokens) with ~150 chars (10%) overlap.
+    """
     parts, buf = [], []
     size = 0
     for block in re.split(r"\n\s*\n", text):
@@ -214,8 +223,14 @@ def chunk_text(text, max_chars=2500):
         if not block:
             continue
         if size + len(block) > max_chars and buf:
-            parts.append("\n\n".join(buf))
-            buf, size = [], 0
+            joined = "\n\n".join(buf)
+            parts.append(joined)
+            # carry over the tail as overlap for the next chunk
+            if overlap_chars > 0 and len(joined) > overlap_chars:
+                tail = joined[-overlap_chars:]
+                buf, size = [tail], len(tail)
+            else:
+                buf, size = [], 0
         buf.append(block)
         size += len(block) + 2
     if buf:

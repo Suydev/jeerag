@@ -35,6 +35,8 @@ footer{padding:12px 14px;border-top:1px solid var(--border);background:var(--pan
 .inrow{display:flex;gap:8px;max-width:900px;margin:0 auto;width:100%}
 textarea{flex:1;resize:none;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;height:52px}
 button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padding:0 18px;font-weight:600;cursor:pointer}
+button.send.stop{background:#c0392b;color:#fff}
+button.send:disabled{opacity:0.6;cursor:not-allowed}
 #settings{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:9}
 #settings .box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(480px,92vw)}
 #settings label{display:block;font-size:13px;color:var(--dim);margin:10px 0 4px}
@@ -72,7 +74,7 @@ button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padd
 <footer>
   <div class="inrow">
     <textarea id="q" placeholder="Ask anything from your notes… e.g. cone of static friction"></textarea>
-    <button class="send" onclick="ask()">Ask</button>
+    <button class="send" id="sendBtn" onclick="ask()">Ask</button>
     <button class="send" style="background:var(--chip);color:var(--fg)" onclick="figures()">🖼</button>
   </div>
 </footer>
@@ -101,50 +103,116 @@ const log = document.getElementById('log');
 let history = [], lastCtx = null;
 marked && (marked.setOptions({breaks:true}));
 
+// --- Chat state machine (research: OpenTranscribe RAG Chat plan) ---
+// idle → submitting → retrieving → thinking → streaming → done
+// error from any point; aborted via stopGeneration at any point ≥ submitting
+let chatState = 'idle';
+let activeController = null;   // AbortController for the current stream
+let activeBox = null;          // assistant message box for the current stream
+
+function setState(s) {
+  chatState = s;
+  const btn = document.getElementById('sendBtn');
+  const q = document.getElementById('q');
+  if (s === 'idle') {
+    btn.textContent = 'Ask';
+    btn.classList.remove('stop');
+    q.disabled = false;
+  } else {
+    btn.textContent = '⏹ Stop';
+    btn.classList.add('stop');
+    q.disabled = (s !== 'idle');
+  }
+}
+
 function el(cls, html){const d=document.createElement('div');d.className=cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
 function math(d){renderMathInElement(d,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],throwOnError:false})}
 
+function stopGeneration() {
+  if (activeController) {
+    activeController.abort();
+    setState('idle');
+    if (activeBox) {
+      const note = document.createElement('div');
+      note.className = 'small';
+      note.textContent = '⏹ Stopped by user.';
+      activeBox.appendChild(note);
+    }
+    activeController = null;
+    activeBox = null;
+  }
+}
+
 async function ask(){
+  if (chatState !== 'idle') { stopGeneration(); return; }
   const q=document.getElementById('q');const text=q.value.trim();if(!text)return;
-  q.value='';el('msg user',text.replace(/</g,'&lt;'));
-  const box=el('msg assistant','<span class="small">searching notes…</span>');
-  const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:text,history})});
+  q.value='';
+  setState('submitting');
+
+  // Optimistic user message
+  el('msg user',text.replace(/</g,'&lt;'));
+  const box=el('msg assistant','<span class="small">retrieving notes…</span>');
+  activeBox = box;
+
+  activeController = new AbortController();
+  const res=await fetch('/api/chat',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({question:text,history}),
+    signal: activeController.signal,
+  });
+  setState('retrieving');
   const reader=res.body.getReader();const dec=new TextDecoder();let buf='',answer='',ctxHtml='';
   const pump=()=>{
     box.innerHTML=(answer?marked.parse(answer):'<span class="small">no LLM answer — see retrieved passages below</span>')+ctxHtml;
     math(box);log.scrollTop=log.scrollHeight;
   };
-  while(true){
-    const{value,done}=await reader.read();if(done)break;
-    buf+=dec.decode(value,{stream:true});
-    let i;
-    while((i=buf.indexOf('\n\n'))>=0){
-      const ev=buf.slice(0,i);buf=buf.slice(i+2);
-      const m=ev.match(/^event: (\w+)\ndata: (.*)$/s);if(!m)continue;
-      const d=JSON.parse(m[2]);
-      if(m[1]==='context'){
-        lastCtx=d;
-        ctxHtml='<div class="ctx"><details><summary>📄 '+d.passages.length+' passages from your notes</summary>'+
-          d.passages.map(p=>'<div class="srcs"><span class="src">'+p.file+' · p.'+p.page+' · '+p.topic+'</span></div><div>'+p.text.slice(0,400).replace(/</g,'&lt;')+'…</div>').join('')+
-          '</details>'+(d.diagrams.length?'<div>'+d.diagrams.map(g=>'<img src="'+g.url+'" alt="diagram p.'+g.page+' ('+g.file+')"><div class="small">diagram · '+g.file+' p.'+g.page+'</div>').join('')+'</div>':'')+'</div>';
-        if(!answer)pump();
-      }else if(m[1]==='delta'){answer+=d.t;pump();}
-      else if(m[1]==='no_llm'||m[1]==='error'){answer=answer||'';ctxHtml+='<div class="small">'+(d.message||'')+'</div>';pump();}
-      else if(m[1]==='done'){
-        pump();history.push({role:'user',content:text});history.push({role:'assistant',content:answer});
-        if(answer&&lastCtx){
-          const g=lastCtx.diagrams&&lastCtx.diagrams[0];
-          const act=document.createElement('div');act.className='act';
-          act.innerHTML='<button>🃏 Save to Deck</button>'+(g?'<button>📄 Open p.'+g.page+'</button>':'');
-          act.children[0].onclick=()=>saveCard(text,answer,g?g.file:null,g?g.page:null,g?g.path:null,g?g.topic:null);
-          if(g)act.children[1].onclick=()=>showPage(g.file,g.page);
-          box.appendChild(act);
+  try {
+    while(true){
+      const{value,done}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let i;
+      while((i=buf.indexOf('\n\n'))>=0){
+        const ev=buf.slice(0,i);buf=buf.slice(i+2);
+        const m=ev.match(/^event: (\w+)\ndata: (.*)$/s);if(!m)continue;
+        const d=JSON.parse(m[2]);
+        if(m[1]==='context'){
+          setState('thinking');
+          lastCtx=d;
+          ctxHtml='<div class="ctx"><details><summary>📄 '+d.passages.length+' passages from your notes</summary>'+
+            d.passages.map(p=>'<div class="srcs"><span class="src">'+p.file+' · p.'+p.page+' · '+p.topic+'</span></div><div>'+p.text.slice(0,400).replace(/</g,'&lt;')+'…</div>').join('')+
+            '</details>'+(d.diagrams.length?'<div>'+d.diagrams.map(g=>'<img src="'+g.url+'" alt="diagram p.'+g.page+' ('+g.file+')"><div class="small">diagram · '+g.file+' p.'+g.page+'</div>').join('')+'</div>':'')+'</div>';
+          if(!answer)pump();
+        }else if(m[1]==='delta'){setState('streaming');answer+=d.t;pump();}
+        else if(m[1]==='no_llm'||m[1]==='error'){answer=answer||'';ctxHtml+='<div class="small">'+(d.message||'')+'</div>';pump();}
+        else if(m[1]==='done'){
+          setState('done');
+          pump();history.push({role:'user',content:text});history.push({role:'assistant',content:answer});
+          if(answer&&lastCtx){
+            const g=lastCtx.diagrams&&lastCtx.diagrams[0];
+            const act=document.createElement('div');act.className='act';
+            act.innerHTML='<button>🃏 Save to Deck</button>'+(g?'<button>📄 Open p.'+g.page+'</button>':'');
+            act.children[0].onclick=()=>saveCard(text,answer,g?g.file:null,g?g.page:null,g?g.path:null,g?g.topic:null);
+            if(g)act.children[1].onclick=()=>showPage(g.file,g.page);
+            box.appendChild(act);
+          }
+          setState('idle');
+          activeController = null; activeBox = null;
         }
       }
     }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      // stopped by user — partial content preserved
+    } else {
+      box.innerHTML += '<div class="small">Error: ' + (e.message||e) + '</div>';
+      setState('idle');
+    }
   }
 }
+setState('idle');
 document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
+document.getElementById('sendBtn').addEventListener('click',ask);
 
 function showPage(file,page){pageimg.src='/pdfpage/'+encodeURIComponent(file)+'/'+page+'.png';document.getElementById('pageview').style.display='flex'}
 function saveCard(q,a,file,page,diagram,topic){
