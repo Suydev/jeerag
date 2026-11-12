@@ -52,10 +52,12 @@ import sqlite3
 import time
 from typing import Iterable
 
-from . import config, retrieve, llm
+from . import config, retrieve, llm, rerank, contextual_retrieval
+from .rerank import convex_combination_fusion
 
 RRF_K = 60  # RRF constant; higher = less influence from top rank
 MAX_LOOPS = 3  # agentic follow-loop budget
+CONVEX_ALPHA = 0.5  # convex combination: equal weight to BM25 + dense
 
 
 # ---------------------------------------------------------------------------
@@ -356,7 +358,7 @@ Output ONLY a single integer 0–5, nothing else."""
 
 
 def grade_relevance(question: str, passage: str, cfg: dict) -> int:
-    """Return 0–5 relevance grade for one passage."""
+    """Return 0-5 relevance grade for one passage."""
     if not llm.configured(cfg):
         return 3
     text = _llm_chat(
@@ -368,6 +370,88 @@ def grade_relevance(question: str, passage: str, cfg: dict) -> int:
     )
     m = re.search(r"([0-5])", text)
     return int(m.group(1)) if m else 3
+
+
+# ---------------------------------------------------------------------------
+# 5b. Enhanced CRAG: 3-class relevance grading (RELEVANT / AMBIGUOUS / IRRELEVANT)
+# ---------------------------------------------------------------------------
+
+CRAG_EVAL_PROMPT = """You are a relevance evaluator for a JEE notes search system.
+
+Question: {question}
+
+Retrieved document:
+{document}
+
+Classify the document's relevance to answering the question.
+
+Respond with exactly one of:
+- RELEVANT: The document contains information that directly helps answer the question.
+- AMBIGUOUS: The document is partially relevant or tangentially related but may not fully answer.
+- IRRELEVANT: The document does not contain useful information for answering the question.
+
+Classification:"""
+
+
+CRAG_REWRITE_PROMPT = """The following question was used to search a notes corpus, but the retrieved results were not sufficiently relevant.
+
+Original question: {question}
+
+Rewrite this question to be more specific and likely to retrieve the correct notes. Focus on including specific terms, chapter names, or concepts that would appear in the target material.
+
+Rewritten question:"""
+
+
+def crag_grade_passages(question: str, passages: list[dict], cfg: dict) -> dict:
+    """CRAG-style 3-class grading of retrieved passages.
+
+    Returns {"label": "RELEVANT"/"AMBIGUOUS"/"IRRELEVANT",
+             "grades": [...], "should_rewrite": bool}
+    """
+    if not llm.configured(cfg) or not passages:
+        return {"label": "RELEVANT", "grades": [], "should_rewrite": False}
+
+    grades = []
+    for h in passages[:5]:
+        text = _llm_chat(
+            [{"role": "user", "content": CRAG_EVAL_PROMPT.format(
+                question=question, document=h.get("text", "")[:1200])}],
+            cfg, temperature=0)
+        label = "IRRELEVANT"
+        for cand in ("RELEVANT", "AMBIGUOUS", "IRRELEVANT"):
+            if cand in text.upper():
+                label = cand
+                break
+        grades.append({"file": h.get("file"), "page": h.get("page"), "label": label})
+
+    relevant = sum(1 for g in grades if g["label"] == "RELEVANT")
+    ambiguous = sum(1 for g in grades if g["label"] == "AMBIGUOUS")
+    irrelevant = sum(1 for g in grades if g["label"] == "IRRELEVANT")
+
+    if relevant > 0:
+        label = "RELEVANT"
+        should_rewrite = False
+    elif ambiguous > 0 and irrelevant == len(grades):
+        label = "AMBIGUOUS"
+        should_rewrite = True
+    else:
+        label = "IRRELEVANT"
+        should_rewrite = True
+
+    return {"label": label, "grades": grades, "should_rewrite": should_rewrite,
+            "counts": {"relevant": relevant, "ambiguous": ambiguous, "irrelevant": irrelevant}}
+
+
+def crag_rewrite_query(question: str, cfg: dict) -> str:
+    """Rewrite a question when CRAG marks retrieval as AMBIGUOUS/IRRELEVANT."""
+    if not llm.configured(cfg):
+        return question
+    text = _llm_chat(
+        [{"role": "user", "content": CRAG_REWRITE_PROMPT.format(question=question)}],
+        cfg, temperature=0.5)
+    text = text.strip()
+    text = re.sub(r"^(rewritten question|question):\s*", "", text, flags=re.I).strip()
+    return text or question
 
 
 # ---------------------------------------------------------------------------
@@ -440,11 +524,19 @@ class AgentLoop:
       8. finish   — return best answer found
     """
 
-    def __init__(self, cfg: dict, max_loops: int = MAX_LOOPS):
+    def __init__(self, cfg: dict, max_loops: int = MAX_LOOPS,
+                 crag_enabled: bool = True,
+                 rerank: bool = False,
+                 fusion: str = "rrf",
+                 contextual: bool = False):
         self.cfg = cfg
         self.max_loops = max_loops
         self.loop_count = 0
         self.trace: list[dict] = []
+        self.crag_enabled = crag_enabled
+        self.rerank = rerank
+        self.fusion = fusion
+        self.contextual = contextual
 
     def run(self, query: str, k: int = 8, kind: str | None = None,
             mode: str = "auto") -> dict:
@@ -468,11 +560,19 @@ class AgentLoop:
             result = advanced_search(
                 query, k=k, kind=current_kind, mode=current_mode,
                 cfg=self.cfg, use_loop=False,
-            )
+                rerank=self.rerank, fusion=self.fusion,
+                contextual=self.contextual)
             elapsed = time.time() - loop_start
 
-            # --- rethink: grade top passages ---
-            grade = self._grade_result(query, result["passages"])
+            # --- rethink: grade top passages (enhanced CRAG 3-class) ---
+            if self.crag_enabled:
+                crag = crag_grade_passages(query, result["passages"], self.cfg)
+                grade_map = {"RELEVANT": 5, "AMBIGUOUS": 3, "IRRELEVANT": 0}
+                grade = grade_map.get(crag["label"], 0)
+                crag_info = crag
+            else:
+                grade = self._grade_result(query, result["passages"])
+                crag_info = {"label": "SKIPPED", "grades": []}
 
             self.trace.append({
                 "loop": self.loop_count,
@@ -480,6 +580,7 @@ class AgentLoop:
                 "kind": current_kind,
                 "mode": current_mode,
                 "grade": grade,
+                "crag": crag_info,
                 "elapsed": round(elapsed, 2),
                 "n_passages": len(result["passages"]),
             })
@@ -494,16 +595,22 @@ class AgentLoop:
                 best = result
                 break
 
-            # --- rethink: decide creativity strategy for next loop ---
-            current_kind, current_mode = self._choose_next_strategy(
-                query, result, current_kind, current_mode
-            )
+            # --- creativity: decide next strategy ---
+            if self.crag_enabled and crag_info.get("should_rewrite"):
+                # CRAG says results are weak → rewrite the query
+                query = crag_rewrite_query(query, self.cfg)
+                current_kind, current_mode = kind, "direct"
+            else:
+                current_kind, current_mode = self._choose_next_strategy(
+                    query, result, current_kind, current_mode
+                )
 
         # If loop exhausted without a good grade, return best found.
         if best is None:
             best = result
         best["loops"] = self.loop_count
         best["trace"] = self.trace
+        best["crag_enabled"] = self.crag_enabled
         return best
 
     def _grade_result(self, query: str, passages: list[dict]) -> int:
@@ -553,8 +660,18 @@ def advanced_search(
     mode: str = "auto",
     cfg: dict | None = None,
     use_loop: bool = True,
+    rerank: bool | None = None,
+    fusion: str | None = None,
+    contextual: bool | None = None,
 ) -> dict:
     """Advanced retrieval: query expansion + multi-query RAG + RRF (+ HyDE + CRAG).
+
+    Research-backed improvements (arxiv:2604.01733):
+      - Cross-encoder reranking (two-stage: BM25 recall pool → LLM rerank)
+        is the single most impactful component (+17pp MRR@3).
+      - Convex Combination fusion as alternative to RRF.
+      - Contextual retrieval: LLM context prepended to chunks at query time.
+      - Enhanced CRAG with 3-class relevance grading (RELEVANT/AMBIGUOUS/IRRELEVANT).
 
     Parameters
     ----------
@@ -569,10 +686,17 @@ def advanced_search(
         - ``"rag_fusion"``: always multi-query + RRF.
         - ``"hyde"``: always BM25-HyDE.
         - ``"direct"``: plain BM25 with domain expansion only.
+        - ``"rerank"``: two-stage BM25 recall → LLM cross-encoder rerank.
     cfg : dict | None
         Runtime config.
     use_loop : bool
         If True, wrap in the agentic follow-loop (rethink/creativity/patch).
+    rerank : bool | None
+        Override config ``rerank_enabled``. Force two-stage reranking on/off.
+    fusion : str | None
+        Override config ``fusion_method``: "rrf" or "convex_combination".
+    contextual : bool | None
+        Override config ``contextual_retrieval``. Use context-augmented search.
 
     Returns
     -------
@@ -581,6 +705,12 @@ def advanced_search(
     """
     cfg = cfg or config.load()
     cfg = dict(cfg)
+
+    # Resolve overrides against config defaults
+    do_rerank = cfg.get("rerank_enabled", False) if rerank is None else rerank
+    do_fusion = cfg.get("fusion_method", "rrf") if fusion is None else fusion
+    do_contextual = cfg.get("contextual_retrieval", False) if contextual is None else contextual
+    do_crag = cfg.get("crag_enabled", True)
 
     # --- Step 1: domain expansion (always, cheap) ---
     domain_variants = expand_query_domain(query)
@@ -591,12 +721,18 @@ def advanced_search(
             kind = "pyq"
 
     # --- Step 3: choose technique ---
-    if mode == "direct":
+    if mode == "rerank" or do_rerank:
+        # Two-stage: BM25 recall pool → LLM cross-encoder rerank
+        result = rerank.two_stage_retrieve(
+            query, k=k, kind=kind, cfg=cfg,
+            recall_pool=cfg.get("rerank_recall_pool", 50))
+        result["query_variants"] = domain_variants
+    elif mode == "direct":
         result = _direct_search(query, k, kind, cfg)
     elif mode == "hyde":
         result = _hyde_search(query, k, kind, cfg)
     elif mode == "rag_fusion":
-        result = _rag_fusion_search(query, k, kind, cfg, domain_variants)
+        result = _rag_fusion_search(query, k, kind, cfg, domain_variants, fusion=do_fusion)
     else:  # auto
         if len(query.split()) <= 4 or any(
             t in query.lower() for t in
@@ -604,15 +740,34 @@ def advanced_search(
         ):
             result = _hyde_search(query, k, kind, cfg)
         else:
-            result = _rag_fusion_search(query, k, kind, cfg, domain_variants)
+            result = _rag_fusion_search(query, k, kind, cfg, domain_variants, fusion=do_fusion)
+
+    # --- Step 3b: contextual retrieval augmentation (prepend context to chunks) ---
+    if do_contextual:
+        ctx_hits = contextual_retrieval.search_with_context(
+            question, k=k, kind=kind, cfg=cfg)
+        if ctx_hits:
+            # Merge: contextual hits take priority, fill remaining with BM25
+            seen = {(h["file"], h["page"]) for h in ctx_hits}
+            for h in result["passages"]:
+                if (h["file"], h["page"]) not in seen:
+                    ctx_hits.append(h)
+                    seen.add((h["file"], h["page"]))
+            result["passages"] = ctx_hits[:k]
+            result["diagrams"] = retrieve.diagrams_for(result["passages"], limit=k)
+            result["method"] += "_contextual"
+            result["contextual"] = True
 
     # --- Step 4: wrap in agentic follow-loop if requested ---
     if use_loop and llm.configured(cfg):
-        loop = AgentLoop(cfg, max_loops=MAX_LOOPS)
-        return loop.run(query, k=k, kind=kind, mode=mode)
+        loop = AgentLoop(cfg, max_loops=MAX_LOOPS, crag_enabled=do_crag)
+        return loop.run(query, k=k, kind=kind, mode=mode,
+                        rerank=do_rerank, fusion=do_fusion,
+                        contextual=do_contextual)
 
     result.setdefault("loops", 1)
     result.setdefault("trace", [])
+    result["crag"] = do_crag
     return result
 
 
@@ -676,7 +831,7 @@ def _hyde_search(query: str, k: int, kind: str | None, cfg: dict) -> dict:
 
 
 def _rag_fusion_search(query: str, k: int, kind: str | None, cfg: dict,
-                       domain_variants: list[str]) -> dict:
+                       domain_variants: list[str], fusion: str = "rrf") -> dict:
     """Multi-query RAG + RRF fusion.
 
     Query variants come from:
@@ -684,6 +839,10 @@ def _rag_fusion_search(query: str, k: int, kind: str | None, cfg: dict,
       2. LLM paraphrases (multi-query)
       3. step-back abstraction (for multi-hop / too-specific questions)
       4. query decomposition (for complex multi-part questions)
+
+    Fusion method:
+      - ``rrf``: Reciprocal Rank Fusion (default, research-proven)
+      - ``convex_combination``: weighted score combination (α=0.5, can outperform RRF)
     """
     variants = list(domain_variants)
     llm_variants = generate_query_variants(query, cfg, n=3)
@@ -706,7 +865,15 @@ def _rag_fusion_search(query: str, k: int, kind: str | None, cfg: dict,
     for v in variants:
         per_query.append(_search_variant(v, max(k * 2, 12), kind, cfg))
 
-    fused = reciprocal_rank_fusion(per_query, k=RRF_K, top_n=k * 2)
+    if fusion == "convex_combination":
+        # Convex Combination: need BM25 + dense, but we only have BM25.
+        # Use domain-expanded variants as the "dense" proxy (different phrasings).
+        bm25_hits = per_query[0] if per_query else []
+        proxy_hits = per_query[1] if len(per_query) > 1 else []
+        fused = convex_combination_fusion(bm25_hits, proxy_hits,
+                                          alpha=CONVEX_ALPHA, top_n=k * 2)
+    else:
+        fused = reciprocal_rank_fusion(per_query, k=RRF_K, top_n=k * 2)
 
     if llm.configured(cfg):
         kept = []
@@ -730,9 +897,10 @@ def _rag_fusion_search(query: str, k: int, kind: str | None, cfg: dict,
     return {
         "passages": fused,
         "diagrams": diags,
-        "method": "rag_fusion_rrf",
+        "method": f"rag_fusion_{fusion}",
         "query_variants": variants,
         "reranked": llm.configured(cfg),
+        "fusion": fusion,
     }
 
 

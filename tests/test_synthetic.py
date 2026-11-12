@@ -126,6 +126,58 @@ def main():
         assert retrieve.related_pyq("moment of inertia") == [], "pyq noise"
         print("synthetic retrieval: PASS")
 
+        # --- New retrieval features (fallback mode, no LLM) ---
+        from jeerag import rerank, contextual_retrieval, advanced_retrieve
+        cfg = {}
+
+        # rerank_passages with fallback scoring
+        rr = rerank.rerank_passages("moment of inertia", hits, cfg, top_n=2)
+        assert len(rr) <= 2, rr
+        assert all("rerank_score" in h for h in rr), rr
+        assert all("rerank_source" in h for h in rr), rr
+        assert all(h["rerank_source"] == "fallback" for h in rr), rr
+        print("rerank_passages (fallback): PASS")
+
+        # two_stage_retrieve with fallback scoring
+        ts = rerank.two_stage_retrieve("moment of inertia", k=2, cfg=cfg)
+        assert ts["reranked"] is True, ts
+        assert ts["recall_pool"] >= 1, ts
+        assert len(ts["passages"]) <= 2, ts
+        print("two_stage_retrieve (fallback): PASS")
+
+        # contextual_retrieval.search_with_context falls back to plain search
+        # when no contexts table exists
+        ctx_hits = contextual_retrieval.search_with_context(
+            "moment of inertia", k=2, cfg=cfg)
+        assert len(ctx_hits) <= 2, ctx_hits
+        print("search_with_context (no contexts table): PASS")
+
+        # advanced_search with various options
+        res = advanced_retrieve.advanced_search(
+            "moment of inertia", k=2, mode="direct", cfg=cfg, use_loop=False)
+        assert res["method"] == "direct_bm25_domain", res
+        assert len(res["passages"]) <= 2, res
+        print("advanced_search (direct): PASS")
+
+        res = advanced_retrieve.advanced_search(
+            "moment of inertia", k=2, mode="rag_fusion", fusion="rrf",
+            cfg=cfg, use_loop=False)
+        assert res["method"] == "rag_fusion_rrf", res
+        print("advanced_search (rag_fusion rrf): PASS")
+
+        res = advanced_retrieve.advanced_search(
+            "moment of inertia", k=2, mode="rag_fusion", fusion="convex_combination",
+            cfg=cfg, use_loop=False)
+        assert res["method"] == "rag_fusion_convex_combination", res
+        print("advanced_search (rag_fusion convex_combination): PASS")
+
+        # convex_combination_fusion directly
+        from jeerag.rerank import convex_combination_fusion
+        fused = convex_combination_fusion(hits[:2], hits[:2], alpha=0.5, top_n=2)
+        assert len(fused) <= 2, fused
+        assert all("fusion" in h for h in fused), fused
+        print("convex_combination_fusion: PASS")
+
         env = dict(os.environ, JEERAG_DATA_DIR=str(data_dir))
         c = McpClient(env)
         try:
@@ -141,6 +193,8 @@ def main():
                              "recent_queries", "evaluate_answer",
                              "rag_answer"):
                 assert new_tool in names, f"missing new tool {new_tool}"
+            for newer_tool in ("search_notes_reranked", "contextualize_index"):
+                assert newer_tool in names, f"missing newer tool {newer_tool}"
             res = c.call("tools/call",
                          {"name": "search_notes",
                           "arguments": {"query": "moment of inertia"}})

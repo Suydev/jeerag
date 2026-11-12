@@ -16,6 +16,13 @@ DEFAULTS = {
     "llm_keys": [],
     "llm_vision_model": "",
     "spaced_repeat": True,
+    # Retrieval improvements (research-backed, arxiv:2604.01733)
+    "rerank_enabled": False,           # LLM cross-encoder rerank after BM25
+    "rerank_recall_pool": 50,          # candidates passed to reranker
+    "rerank_top_n": 8,                 # final results after reranking
+    "contextual_retrieval": False,     # prepend LLM context to chunks at query time
+    "fusion_method": "rrf",            # "rrf" | "convex_combination"
+    "crag_enabled": True,              # adaptive corrective retrieval
 }
 
 

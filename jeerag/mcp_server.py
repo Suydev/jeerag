@@ -37,7 +37,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from . import retrieve, advanced_retrieve
+from . import retrieve, advanced_retrieve, rerank, contextual_retrieval
 from .llm import health as llm_health
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -114,12 +114,13 @@ def t_index_stats():
 
 
 def t_search_notes_advanced(query: str, k: int = 8, kind: str | None = None,
-                            mode: str = "auto"):
-    """Advanced search with agentic follow-loop (query expansion, RAG-Fusion,
-    HyDE, CRAG re-grading). Falls back to basic BM25 on error."""
+                            mode: str = "auto", rerank: bool = False,
+                            fusion: str = "rrf", contextual: bool = False):
+    """Advanced search with agentic follow-loop."""
     try:
         res = advanced_retrieve.advanced_search(
-            query, k=k, kind=kind, mode=mode, use_loop=True)
+            query, k=k, kind=kind, mode=mode, use_loop=True,
+            rerank=rerank, fusion=fusion, contextual=contextual)
         return {
             "passages": res["passages"],
             "diagrams": res["diagrams"],
@@ -255,6 +256,32 @@ def t_rag_answer(question: str, k: int = 8):
     return out
 
 
+def t_search_notes_reranked(query: str, k: int = 8):
+    """Two-stage retrieval: BM25 recall pool → LLM cross-encoder rerank."""
+    try:
+        from . import rerank
+        res = rerank.two_stage_retrieve(query, k=k, cfg=retrieve.config.load())
+        return {
+            "passages": res["passages"],
+            "diagrams": res["diagrams"],
+            "method": res.get("method", "two_stage_bm25_rerank"),
+            "reranked": res.get("reranked", False),
+            "recall_pool": res.get("recall_pool", 0),
+        }
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+
+
+def t_contextualize_index(limit=None):
+    """Generate LLM context summaries for indexed chunks."""
+    try:
+        lim = int(limit) if limit is not None else None
+    except (TypeError, ValueError):
+        lim = None
+    result = contextual_retrieval.contextualize_index(limit=lim)
+    return result
+
+
 TOOLS = {
     "search_notes": {
         "fn": t_search_notes,
@@ -305,13 +332,34 @@ TOOLS = {
         "fn": t_search_notes_advanced,
         "description": "Advanced search with agentic follow-loop: query expansion, "
                        "RAG-Fusion multi-query + RRF, BM25-HyDE, CRAG relevance "
-                       "re-grading, context distillation, and query routing "
-                       "(notes vs pyq). Loops up to 3 times to improve results.",
+                       "re-grading, context distillation, query routing, "
+                       "cross-encoder reranking, and contextual retrieval. "
+                       "Loops up to 3 times to improve results.",
         "schema": {"type": "object", "properties": {
             "query": {"type": "string", "description": "search terms"},
             "k": {"type": "integer", "default": 8, "description": "how many passages"},
             "kind": {"type": "string", "description": "filter by kind: 'notes' or 'pyq'"}},
             "required": ["query"]},
+    },
+    "search_notes_reranked": {
+        "fn": t_search_notes_reranked,
+        "description": "Two-stage retrieval: BM25 recall pool (50 candidates) → "
+                       "LLM cross-encoder rerank to top-k. Research shows reranking "
+                       "is the single most impactful retrieval component.",
+        "schema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "search terms"},
+            "k": {"type": "integer", "default": 8, "description": "final results"}},
+            "required": ["query"]},
+    },
+    "contextualize_index": {
+        "fn": t_contextualize_index,
+        "description": "Generate LLM context summaries for all indexed chunks and "
+                       "store them. Enables contextual retrieval (context prepended "
+                       "to chunks at query time) which consistently improves recall.",
+        "schema": {"type": "object", "properties": {
+            "limit": {"type": "integer", "default": None,
+                      "description": "max chunks to contextualize (None = all)"}},
+            "required": []},
     },
     "llm_health": {
         "fn": t_llm_health,

@@ -230,12 +230,35 @@ class Handler(BaseHTTPRequestHandler):
             cfg["llm_api_key_set"] = bool(key)
             self._json(cfg)
         elif u.path == "/api/search":
-            q = parse_qs(u.query).get("q", [""])[0]
-            kind = parse_qs(u.query).get("kind", [None])[0]
-            hits = retrieve.search(q, kind=kind)
+            qs = parse_qs(u.query)
+            q = qs.get("q", [""])[0]
+            kind = qs.get("kind", [None])[0]
+            try:
+                k = max(1, min(int(qs.get("k", ["8"])[0]), 24))
+            except ValueError:
+                k = 8
+            rerank = qs.get("rerank", ["false"])[0].lower() == "true"
+            fusion = qs.get("fusion", ["rrf"])[0]
+            contextual = qs.get("contextual", ["false"])[0].lower() == "true"
+            try:
+                from . import advanced_retrieve
+                res = advanced_retrieve.advanced_search(
+                    q, k=k, kind=kind, mode="auto",
+                    use_loop=False, rerank=rerank, fusion=fusion,
+                    contextual=contextual)
+                hits = res["passages"]
+                diags = res["diagrams"]
+                method = res.get("method", "advanced")
+                reranked = res.get("reranked", False)
+            except Exception:
+                hits = retrieve.search(q, kind=kind)
+                diags = retrieve.diagrams_for(hits)
+                method = "basic_bm25"
+                reranked = False
             from .tracker import log_query
             log_query(q, hits, "search")
-            self._json({"passages": hits, "diagrams": retrieve.diagrams_for(hits)})
+            self._json({"passages": hits, "diagrams": diags,
+                        "method": method, "reranked": reranked})
         elif u.path == "/api/pyq":
             # past-year questions + official answer keys (kind='pyq' corpus)
             qs = parse_qs(u.query)
@@ -398,7 +421,9 @@ class Handler(BaseHTTPRequestHandler):
             allowed = ("llm_base_url", "llm_model", "llm_api_key", "llm_keys",
                        "llm_vision_model", "top_k", "port", "spaced_repeat",
                        "llm_temperature", "llm_top_p", "llm_max_tokens",
-                       "llm_system_prompt", "llm_provider", "llm_providers")
+                       "llm_system_prompt", "llm_provider", "llm_providers",
+                       "rerank_enabled", "rerank_recall_pool", "rerank_top_n",
+                       "contextual_retrieval", "fusion_method", "crag_enabled")
             updates = {k: v for k, v in body.items()
                        if k in allowed
                        and not (k in ("llm_api_key", "llm_keys") and "…" in str(v))}
@@ -437,6 +462,15 @@ class Handler(BaseHTTPRequestHandler):
             self.chat_stream(body)
         elif u.path == "/api/answer":
             self.answer_json(body)
+        elif u.path == "/api/contextualize_index":
+            lim = body.get("limit")
+            try:
+                from . import contextual_retrieval
+                result = contextual_retrieval.contextualize_index(
+                    limit=int(lim) if lim is not None else None)
+                self._json(result)
+            except Exception as e:
+                self._json({"error": f"{type(e).__name__}: {e}"}, 400)
         else:
             self.send_error(404)
 
@@ -466,12 +500,32 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "question required"}, 400)
             return
         cfg = config.load()
-        hits, diags, method, loops = retrieve_for_question(question, cfg)
+        rerank = bool(body.get("rerank", cfg.get("rerank_enabled", False)))
+        fusion = body.get("fusion", cfg.get("fusion_method", "rrf"))
+        contextual = bool(body.get("contextual", cfg.get("contextual_retrieval", False)))
+        try:
+            from . import advanced_retrieve
+            res = advanced_retrieve.advanced_search(
+                question, k=cfg.get("top_k", 8), kind=None, mode="auto",
+                use_loop=True, rerank=rerank, fusion=fusion,
+                contextual=contextual)
+            hits = res["passages"]
+            diags = res["diagrams"]
+            method = res.get("method", "advanced")
+            loops = res.get("loops", 1)
+            reranked = res.get("reranked", False)
+        except Exception:
+            hits = retrieve.search(question)
+            diags = retrieve.diagrams_for(hits)
+            method = "basic_bm25"
+            loops = 1
+            reranked = False
         pyq = _related_pyq(question)
         from .tracker import log_query
         log_query(question, hits, "answer")
         out = {"question": question, "method": method, "loops": loops,
-               "passages": hits, "diagrams": diags, "pyq": pyq, "answer": None}
+               "passages": hits, "diagrams": diags, "pyq": pyq,
+               "reranked": reranked, "answer": None}
         if not (cfg.get("llm_base_url") or "").strip():
             out["note"] = ("no LLM endpoint configured — passages only; set "
                            "llm_base_url via POST /api/config or config.json")
@@ -494,8 +548,27 @@ class Handler(BaseHTTPRequestHandler):
         question = str(body.get("question", ""))[:2000]
         history = body.get("history") or []
         cfg = config.load()
+        rerank = bool(body.get("rerank", cfg.get("rerank_enabled", False)))
+        fusion = body.get("fusion", cfg.get("fusion_method", "rrf"))
+        contextual = bool(body.get("contextual", cfg.get("contextual_retrieval", False)))
         # --- Advanced retrieval with agentic follow-loop (cached) ---
-        hits, diags, method, loops = retrieve_for_question(question, cfg)
+        try:
+            from . import advanced_retrieve
+            res = advanced_retrieve.advanced_search(
+                question, k=cfg.get("top_k", 8), kind=None, mode="auto",
+                use_loop=True, rerank=rerank, fusion=fusion,
+                contextual=contextual)
+            hits = res["passages"]
+            diags = res["diagrams"]
+            method = res.get("method", "advanced")
+            loops = res.get("loops", 1)
+            reranked = res.get("reranked", False)
+        except Exception:
+            hits = retrieve.search(question)
+            diags = retrieve.diagrams_for(hits)
+            method = "basic_bm25"
+            loops = 1
+            reranked = False
         pyq = _related_pyq(question)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -510,7 +583,8 @@ class Handler(BaseHTTPRequestHandler):
                 raise SystemExit
 
         send("context", {"passages": hits, "diagrams": diags,
-                         "pyq": pyq, "method": method, "loops": loops})
+                         "pyq": pyq, "method": method, "loops": loops,
+                         "reranked": reranked})
         from .tracker import log_query
         log_query(question, hits, "chat")
         if not (cfg.get("llm_base_url") or "").strip():
