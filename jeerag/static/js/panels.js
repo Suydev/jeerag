@@ -107,6 +107,33 @@ function figureCard(g) {
   return fig;
 }
 
+/** One harvested page: relation lines (OCR'd, folded to Unicode) + recaps. */
+function formulaSection(s) {
+  const body = el('div', { class: 'p-body' });
+  if ((s.formulas || []).length) {
+    const fx = el('div', { class: 'fx' });
+    for (const f of s.formulas) fx.append(el('div', { class: 'fx-row', text: f }));
+    body.append(fx);
+  }
+  if ((s.recaps || []).length) {
+    body.append(el('ul', { class: 'recap' },
+      ...s.recaps.map((r) => el('li', { text: r }))));
+  }
+  if ((s.images || []).length) {
+    const gal = el('div', { class: 'gal' });
+    for (const g of s.images) gal.append(figureCard({ url: g.url, file: s.file, page: s.page, caption: '' }));
+    body.append(gal);
+  }
+  body.append(el('button', { class: 'btn ghost small-p', type: 'button',
+    onclick: () => showPage(s.file, s.page) }, iconEl('doc'), `Open p.${s.page}`));
+  return el('details', { class: 'passage' },
+    el('summary', {},
+      iconEl('chevR'),
+      el('span', { class: 'pl', text: `${s.file} · p.${s.page}` }),
+      el('span', { class: 'pt', text: s.topic || '' })),
+    body);
+}
+
 function passageRow(p) {
   return el('details', { class: 'passage' },
     el('summary', {},
@@ -135,6 +162,8 @@ export function openSearch({ tab = 'notes', initial = '' } = {}) {
       onclick: () => setTab('notes') }),
     el('button', { role: 'tab', 'aria-selected': String(tab === 'figures'), text: 'Figures',
       onclick: () => setTab('figures') }),
+    el('button', { role: 'tab', 'aria-selected': String(tab === 'formulas'), text: 'Formulas',
+      onclick: () => setTab('formulas') }),
   );
   const results = el('div', {});
 
@@ -142,7 +171,7 @@ export function openSearch({ tab = 'notes', initial = '' } = {}) {
   function setTab(t) {
     curTab = t;
     for (const b of tabs.querySelectorAll('[role="tab"]')) {
-      b.setAttribute('aria-selected', String(b.textContent.trim() === t));
+      b.setAttribute('aria-selected', String(b.textContent.trim().toLowerCase() === t));
     }
     if (input.value.trim()) run();
   }
@@ -158,6 +187,16 @@ export function openSearch({ tab = 'notes', initial = '' } = {}) {
         results.replaceChildren();
         if (!passages.length) results.append(el('p', { class: 'small', text: 'No passages matched.' }));
         for (const p of passages.slice(0, 12)) results.append(passageRow(p));
+      } else if (curTab === 'formulas') {
+        const { sections = [], error } = await api.formulas(q);
+        results.replaceChildren();
+        if (error) {
+          results.append(el('p', { class: 'small', text: `Formula harvest failed: ${error}` }));
+        } else if (!sections.length) {
+          results.append(el('p', { class: 'small',
+            text: 'No formula-bearing pages matched this topic.' }));
+        }
+        for (const s of sections) results.append(formulaSection(s));
       } else {
         const { diagrams } = await api.diagrams(q);
         results.replaceChildren();
@@ -441,6 +480,8 @@ export function openSettings() {
     $('s_key').value = '';
     $('s_key').placeholder = c.llm_api_key_set ? '(saved — leave blank to keep)' : '(none saved)';
     $('s_topk').value = String(c.top_k || 8);
+    $('s_temp').value = (c.llm_temperature ?? 0.2);
+    $('s_sysprompt').value = c.llm_system_prompt || '';
   }).catch((e) => toast(`Config unavailable: ${e.message}`, { type: 'err' }));
 
   $('s_base').focus();
@@ -469,6 +510,9 @@ function wireSettings() {
     };
     const key = $('s_key').value.trim();
     if (key && !key.startsWith('(saved')) updates.llm_api_key = key;
+    const temp = parseFloat($('s_temp').value);
+    if (!Number.isNaN(temp)) updates.llm_temperature = Math.min(2, Math.max(0, temp));
+    updates.llm_system_prompt = $('s_sysprompt').value; // '' → back to the default prompt
     try {
       await api.saveConfig(updates);
       toast('Settings saved.', { type: 'ok' });

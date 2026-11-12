@@ -82,6 +82,8 @@ class LLMManager:
                     "model": model,
                     "key": key,
                     "temperature": float(cfg.get("llm_temperature", 0.2)),
+                    "top_p": cfg.get("llm_top_p"),
+                    "max_tokens": cfg.get("llm_max_tokens"),
                     "timeout": int(cfg.get("llm_timeout", 120)),
                     "connect_timeout": int(
                         cfg.get("llm_connect_timeout", 10)

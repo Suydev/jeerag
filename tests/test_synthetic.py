@@ -4,6 +4,7 @@ Builds a one-file index.db with the real schema in a temp dir, points the
 package at it via JEERAG_DATA_DIR, and exercises retrieval plus a full MCP
 stdio round trip. Run: python tests/test_synthetic.py
 """
+import json
 import os
 import subprocess
 import sys
@@ -108,12 +109,80 @@ def main():
             tools = c.call("tools/list")["tools"]
             names = {t["name"] for t in tools}
             assert "search_notes" in names and "list_topics" in names, names
+            for new_tool in ("search_pyq", "get_page_context",
+                             "harvest_formulas", "add_study_card",
+                             "delete_study_card", "study_stats",
+                             "recent_queries", "evaluate_answer",
+                             "rag_answer"):
+                assert new_tool in names, f"missing new tool {new_tool}"
             res = c.call("tools/call",
                          {"name": "search_notes",
                           "arguments": {"query": "moment of inertia"}})
             text = "".join(x.get("text", "") for x in res["content"])
             assert "rotation.pdf" in text, text
             print("synthetic MCP stdio: PASS")
+
+            # --- new tools ---
+            res = c.call("tools/call", {"name": "get_page_context",
+                                        "arguments": {"file": "rotation.pdf",
+                                                      "page": 3, "radius": 1}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert out.get("pages") and "inertia" in out["pages"][0]["text"], out
+            print("get_page_context: PASS")
+
+            res = c.call("tools/call", {"name": "harvest_formulas",
+                                        "arguments": {"topic": "rotation"}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert out.get("topic") == "rotation", out
+            assert "sections" in out, out
+            print("harvest_formulas: PASS")
+
+            res = c.call("tools/call", {"name": "study_stats",
+                                        "arguments": {"days": 7}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert "days" in out and "topics" in out, out
+            print("study_stats: PASS")
+
+            res = c.call("tools/call", {"name": "recent_queries",
+                                        "arguments": {"limit": 5}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert "queries" in out, out
+            print("recent_queries: PASS")
+
+            res = c.call("tools/call", {"name": "search_pyq",
+                                        "arguments": {"query": "inertia"}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert "passages" in out and "diagrams" in out, out
+            print("search_pyq: PASS")
+
+            res = c.call("tools/call", {"name": "rag_answer",
+                                        "arguments": {"question": "moment of inertia"}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert out.get("answer") is None and out.get("note"), out
+            assert out.get("passages"), out
+            print("rag_answer (no LLM): PASS")
+
+            res = c.call("tools/call", {"name": "add_study_card",
+                                        "arguments": {"question": "test card q",
+                                                      "answer": "test card a",
+                                                      "topic": "Rotation"}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert out.get("id"), out
+            cid = out["id"]
+            res = c.call("tools/call", {"name": "delete_study_card",
+                                        "arguments": {"id": cid}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            assert out.get("deleted") is True, out
+            print("add/delete_study_card: PASS")
+
+            res = c.call("tools/call", {"name": "evaluate_answer",
+                                        "arguments": {"question": "moment of inertia",
+                                                      "answer": "I = sum m r^2"}})
+            out = json.loads("".join(x.get("text", "") for x in res["content"]))
+            for metric in ("faithfulness", "answer_relevancy",
+                           "context_precision", "context_recall"):
+                assert metric in out, (metric, out)
+            print("evaluate_answer: PASS", out)
         finally:
             c.close()
 

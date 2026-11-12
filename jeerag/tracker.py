@@ -50,6 +50,18 @@ def summary(days: int = 7, limit: int = 15) -> dict:
             "topics": [{"topic": t, "count": c} for t, c in ranked]}
 
 
+def recent(limit: int = 10) -> list[dict]:
+    """Most recent logged queries (newest first) with their topics and files."""
+    con = sqlite3.connect(DB_PATH, timeout=30)
+    con.execute(SCHEMA)
+    rows = con.execute(
+        "SELECT ts, question, topics, files, source FROM queries "
+        "ORDER BY ts DESC LIMIT ?", (max(1, min(int(limit), 100)),)).fetchall()
+    con.close()
+    return [{"ts": r[0], "question": r[1], "topics": json.loads(r[2]),
+             "files": json.loads(r[3]), "source": r[4]} for r in rows]
+
+
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(prog="jeerag tracker")

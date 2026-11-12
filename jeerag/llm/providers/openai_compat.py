@@ -103,6 +103,8 @@ class OpenAICompatibleProvider(LLMProvider):
         self.temperature = float(
             self.cfg.get("temperature", self.cfg.get("llm_temperature", 0.2))
         )
+        self.top_p = self._num_cfg("top_p", "llm_top_p")
+        self.default_max_tokens = self._num_cfg("max_tokens", "llm_max_tokens", int)
         self.timeout = int(
             self.cfg.get("timeout", self.cfg.get("llm_timeout", 120))
         )
@@ -121,6 +123,16 @@ class OpenAICompatibleProvider(LLMProvider):
                 self.cfg.get("llm_first_event_timeout", FIRST_EVENT_TIMEOUT),
             )
         )
+
+    def _num_cfg(self, key: str, alt_key: str, cast=float):
+        """Read a numeric config value (float/int or None) from either key."""
+        raw = self.cfg.get(key, self.cfg.get(alt_key))
+        if raw is None or raw == "":
+            return None
+        try:
+            return cast(raw)
+        except (TypeError, ValueError):
+            return None
 
     def configured(self) -> bool:
         return bool(self.base_url and self.model)
@@ -170,7 +182,11 @@ class OpenAICompatibleProvider(LLMProvider):
             "temperature": temperature,
         }
         if max_tokens:
-            payload["max_tokens"] = max_tokens
+            payload["max_tokens"] = int(max_tokens)
+        elif self.default_max_tokens:
+            payload["max_tokens"] = int(self.default_max_tokens)
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",

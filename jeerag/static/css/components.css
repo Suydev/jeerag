@@ -80,7 +80,9 @@ svg[hidden], span[hidden], button[hidden] { display: none !important; }
   background: transparent; color: var(--dim); font: 600 var(--fs--1) var(--font);
   transition: all var(--t-fast);
 }
-.seg button[aria-checked="true"] { background: var(--acc); color: var(--acc-fg); }
+.seg button[aria-checked="true"], .seg button[aria-selected="true"] {
+  background: var(--acc); color: var(--acc-fg);
+}
 
 .swatches { display: flex; gap: 8px; margin-top: 12px; }
 .swatch {

@@ -101,6 +101,19 @@ def grade(card_id, score):
     return {"id": card_id, "due": nxt, "interval": interval, "ease": round(ease, 2)}
 
 
+def delete(card_id) -> bool:
+    """Remove one card from the deck. True if it existed."""
+    try:
+        cid = int(card_id)
+    except (TypeError, ValueError):
+        return False
+    con = connect()
+    cur = con.execute("DELETE FROM cards WHERE id=?", (cid,))
+    con.commit()
+    con.close()
+    return cur.rowcount > 0
+
+
 def stats():
     con = connect()
     total = con.execute("SELECT COUNT(*) c FROM cards").fetchone()["c"]

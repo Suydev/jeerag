@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import time
-from http.client import HTTPSConnection
+from http.client import HTTPConnection, HTTPSConnection
 from typing import Iterator
 from urllib.parse import urlparse
 
@@ -35,6 +35,8 @@ class AnthropicProvider(LLMProvider):
         self.temperature = float(
             self.cfg.get("temperature", self.cfg.get("llm_temperature", 0.2))
         )
+        self.top_p = self._num_cfg("top_p", "llm_top_p")
+        self.default_max_tokens = self._num_cfg("max_tokens", "llm_max_tokens", int)
         self.timeout = int(self.cfg.get("timeout", self.cfg.get("llm_timeout", 120)))
         self.connect_timeout = int(
             self.cfg.get("connect_timeout", self.cfg.get("llm_connect_timeout", 10))
@@ -48,6 +50,16 @@ class AnthropicProvider(LLMProvider):
                 self.cfg.get("llm_first_event_timeout", 15),
             )
         )
+
+    def _num_cfg(self, key: str, alt_key: str, cast=float):
+        """Read a numeric config value (float/int or None) from either key."""
+        raw = self.cfg.get(key, self.cfg.get(alt_key))
+        if raw is None or raw == "":
+            return None
+        try:
+            return cast(raw)
+        except (TypeError, ValueError):
+            return None
 
     def configured(self) -> bool:
         return bool(self.base_url and self.key and self.model)
@@ -103,15 +115,20 @@ class AnthropicProvider(LLMProvider):
             "anthropic-version": "2023-06-01",
         }
 
+    def _connect(self, parsed, timeout: int):
+        """HTTP or HTTPS connection to the endpoint (supports local gateways)."""
+        if parsed.scheme == "http":
+            return HTTPConnection(parsed.hostname, parsed.port or 80, timeout=timeout)
+        return HTTPSConnection(
+            parsed.hostname, parsed.port or 443, timeout=timeout)
+
     def _post(self, payload: dict, timeout: int | None = None) -> tuple[int, str]:
         parsed = urlparse(self.base_url)
         path = "/v1/messages"
         body = json.dumps(payload).encode()
         headers = self._headers()
         headers["Content-Length"] = str(len(body))
-        conn = HTTPSConnection(
-            parsed.hostname, parsed.port or 443, timeout=self.connect_timeout
-        )
+        conn = self._connect(parsed, self.connect_timeout)
         try:
             conn.request("POST", path, body=body, headers=headers)
             resp = conn.getresponse()
@@ -136,10 +153,12 @@ class AnthropicProvider(LLMProvider):
         payload = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": max_tokens or 1024,
+            "max_tokens": int(max_tokens or self.default_max_tokens or 1024),
             "temperature": temperature,
             "stream": True,
         }
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
         headers = self._headers()
         headers["Content-Type"] = "application/json"
         headers["Accept"] = "text/event-stream"
@@ -149,9 +168,7 @@ class AnthropicProvider(LLMProvider):
         body = json.dumps(payload).encode()
         headers["Content-Length"] = str(len(body))
 
-        conn = HTTPSConnection(
-            parsed.hostname, parsed.port or 443, timeout=self.connect_timeout
-        )
+        conn = self._connect(parsed, self.connect_timeout)
         try:
             conn.request("POST", path, body=body, headers=headers)
             resp = conn.getresponse()

@@ -6,16 +6,27 @@ in the ``mcp`` SDK (whose pydantic/cryptography deps do not build on Termux).
 Any MCP client — Claude Desktop, an agent SDK, ``mcp-cli`` — can talk to it.
 
 Tools
-  search_notes      BM25 over pages, with diagram urls
-  search_diagrams   caption/BM25 search over the 2,458 figure crops
-  get_page          one page's OCR text + its diagrams
-  get_diagram       a diagram crop as a real PNG image
-  list_topics       every PDF with topic/subject/page counts
-  index_stats       file/page/chunk/diagram counts
+   search_notes          BM25 over pages, with diagram urls
+   search_notes_advanced agentic loop: expansion, RAG-Fusion, HyDE, CRAG
+   search_pyq            search restricted to previous-year questions
+   search_diagrams       caption/BM25 search over the figure crops
+   get_page              one page's OCR text + its diagrams
+   get_page_context      one page plus `radius` neighbouring pages
+   get_diagram           a diagram crop as a real PNG image
+   harvest_formulas      relation lines + recaps + diagram URIs for a topic
+   list_topics           every PDF with topic/subject/page counts
+   index_stats           file/page/chunk/diagram counts
+   add_study_card        add a card to the SM-2 Doubt Deck
+   delete_study_card     remove a card from the Doubt Deck
+   study_stats           weak-topic usage summary over N days
+   recent_queries        most recent logged queries
+   evaluate_answer       RAGAS-style grading of one Q/A pair
+   rag_answer            one-shot retrieve + LLM answer (non-streaming)
+   llm_health            health of every configured LLM endpoint
 Resources
-  jeerag://notes          index of every indexed PDF
-  jeerag://notes/{file}/p{page}   one page as markdown (text + diagram uris)
-  jeerag://diagram/{path} one crop as an image resource
+   jeerag://notes          index of every indexed PDF
+   jeerag://notes/{file}/p{page}   one page as markdown (text + diagram uris)
+   jeerag://diagram/{path} one crop as an image resource
 """
 from __future__ import annotations
 
@@ -30,7 +41,7 @@ from . import retrieve, advanced_retrieve
 from .llm import health as llm_health
 
 PROTOCOL_VERSION = "2025-06-18"
-SERVER_INFO = {"name": "jeerag", "version": "1.1.0"}
+SERVER_INFO = {"name": "jeerag", "version": "1.2.0"}
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +137,124 @@ def t_llm_health():
     return llm_health()
 
 
+def t_search_pyq(query: str, k: int = 8):
+    """Search restricted to previous-year questions (kind='pyq')."""
+    hits = retrieve.search(query, k, kind="pyq")
+    return {"passages": hits, "diagrams": retrieve.diagrams_for(hits)}
+
+
+def t_get_page_context(file: str, page: int, radius: int = 1):
+    """One page's OCR text plus `radius` neighbouring pages.
+
+    Handwritten notes continue across pages, so agents usually want the
+    surrounding context before answering from a single page.
+    """
+    radius = max(0, min(int(radius), 3))
+    pages = []
+    for p in range(max(1, int(page) - radius), int(page) + radius + 1):
+        t = retrieve.page_text(file, p)
+        if t:
+            pages.append(t)
+    if not pages:
+        return {"error": f"no pages found near {file} p{page}"}
+    return {"file": file, "center": int(page), "pages": pages}
+
+
+def t_harvest_formulas(topic: str, k: int = 6):
+    """Harvest relation lines + recap sentences + diagram URIs for a topic.
+
+    Formulas are machine-read from scans and folded to readable Unicode, so
+    ``\\frac{\\mu N}{m}`` comes back as ``μN/m``. Check the cited page image
+    before trusting a sign or exponent.
+    """
+    from . import formulas
+    sections = formulas.collect(topic, k=max(1, min(int(k), 12)))
+    for s in sections:
+        s["images"] = [f"jeerag://diagram/{quote(p)}" for p in s.pop("images", [])]
+    return {"topic": topic, "sections": sections}
+
+
+def t_add_study_card(question: str, answer: str, file: str | None = None,
+                     page: int | None = None, topic: str | None = None):
+    """Add a card to the SM-2 Doubt Deck; review it from the web UI."""
+    from . import review
+    cid = review.add(str(question)[:500], str(answer)[:4000],
+                     file, int(page) if page else None, None, topic)
+    return {"id": cid, "scheduled": "tomorrow",
+            "note": "visible in the web UI Doubt Deck (SM-2 spaced repetition)"}
+
+
+def t_delete_study_card(id: int):
+    """Remove one card from the Doubt Deck."""
+    from . import review
+    ok = review.delete(id)
+    return {"deleted": bool(ok), "id": id}
+
+
+def t_study_stats(days: int = 7):
+    """Weak-topic usage summary (which chapters get asked about)."""
+    from . import tracker
+    return tracker.summary(max(1, min(int(days), 365)))
+
+
+def t_recent_queries(limit: int = 10):
+    """Most recent logged queries with their topics and files."""
+    from . import tracker
+    return {"queries": tracker.recent(max(1, min(int(limit), 100)))}
+
+
+def t_evaluate_answer(question: str, answer: str,
+                      contexts: list[str] | None = None):
+    """RAGAS-style grading of one Q/A pair (faithfulness, relevancy,
+    context precision/recall). Falls back to retrieving contexts for the
+    question when none are supplied."""
+    from . import eval as _eval
+    ctxs = contexts
+    if not ctxs:
+        hits = retrieve.search(question, 6)
+        ctxs = [h.get("text", "") for h in hits]
+    return _eval.evaluate_answer(question, answer, ctxs)
+
+
+def t_rag_answer(question: str, k: int = 8):
+    """One-shot RAG answer: retrieve passages, then answer with the
+    configured LLM. Without an LLM endpoint it returns passages + a note."""
+    cfg = retrieve.config.load()
+    try:
+        res = advanced_retrieve.advanced_search(
+            question, k=int(k), kind=None, mode="auto", use_loop=True)
+        hits, diags = res["passages"], res["diagrams"]
+        method = res.get("method", "advanced")
+    except Exception:
+        hits = retrieve.search(question, int(k))
+        diags, method = retrieve.diagrams_for(hits), "basic_bm25"
+    out = {"question": question, "method": method,
+           "passages": hits, "diagrams": diags, "answer": None}
+    if not (cfg.get("llm_base_url") or "").strip():
+        out["note"] = "no LLM configured — passages only"
+        return out
+    try:
+        from .llm.manager import llm_manager
+        ctx, _ = advanced_retrieve.build_advanced_context(
+            question, k=len(hits), cfg=cfg)
+        sys_prompt = (str(cfg.get("llm_system_prompt") or "").strip()
+                      or ("You are a JEE tutor. Answer ONLY from the provided "
+                          "excerpts from the student's scanned notes. Cite "
+                          "sources as (filename, p.N). Write math in LaTeX "
+                          "($...$, $$...$$). If the excerpts don't cover the "
+                          "question, say so."))
+        messages = [{"role": "system", "content": sys_prompt},
+                    {"role": "user", "content":
+                     f"NOTES EXCERPTS:\n{ctx}\n\nQUESTION: {question}"}]
+        mt = cfg.get("llm_max_tokens")
+        out["answer"] = "".join(llm_manager(cfg).chat(
+            messages, float(cfg.get("llm_temperature", 0.2)),
+            int(mt) if mt else None)).strip()
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
 TOOLS = {
     "search_notes": {
         "fn": t_search_notes,
@@ -190,6 +319,93 @@ TOOLS = {
                        "(multi-LLM ensemble / 'RAG of LLMs'). Returns ok/model/reason "
                        "for each endpoint so you can see which providers are alive.",
         "schema": {"type": "object", "properties": {}},
+    },
+    "search_pyq": {
+        "fn": t_search_pyq,
+        "description": "Search restricted to previous-year questions (kind='pyq') "
+                       "— past JEE questions from the question bank.",
+        "schema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "search terms"},
+            "k": {"type": "integer", "default": 8}},
+            "required": ["query"]},
+    },
+    "get_page_context": {
+        "fn": t_get_page_context,
+        "description": "OCR text of one page PLUS `radius` neighbouring pages — "
+                       "handwritten notes continue across pages, so fetch the "
+                       "surrounding context before answering from a single page.",
+        "schema": {"type": "object", "properties": {
+            "file": {"type": "string"},
+            "page": {"type": "integer"},
+            "radius": {"type": "integer", "default": 1,
+                       "description": "pages on each side (0-3)"}},
+            "required": ["file", "page"]},
+    },
+    "harvest_formulas": {
+        "fn": t_harvest_formulas,
+        "description": "Harvest formula/relation lines (LaTeX folded to readable "
+                       "Unicode) + recap sentences + diagram URIs for a topic — "
+                       "builds a revision-sheet style summary from the scans.",
+        "schema": {"type": "object", "properties": {
+            "topic": {"type": "string", "description": "e.g. 'friction', 'rotational motion'"},
+            "k": {"type": "integer", "default": 6, "description": "pages to draw from"}},
+            "required": ["topic"]},
+    },
+    "add_study_card": {
+        "fn": t_add_study_card,
+        "description": "Add a question/answer card to the SM-2 spaced-repetition "
+                       "Doubt Deck; the student reviews it in the web UI.",
+        "schema": {"type": "object", "properties": {
+            "question": {"type": "string"},
+            "answer": {"type": "string"},
+            "file": {"type": "string", "description": "source PDF name"},
+            "page": {"type": "integer", "description": "source page"},
+            "topic": {"type": "string"}},
+            "required": ["question", "answer"]},
+    },
+    "delete_study_card": {
+        "fn": t_delete_study_card,
+        "description": "Remove one card from the Doubt Deck by id.",
+        "schema": {"type": "object", "properties": {
+            "id": {"type": "integer"}}, "required": ["id"]},
+    },
+    "study_stats": {
+        "fn": t_study_stats,
+        "description": "Weak-topic usage summary: which chapters the student has "
+                       "been asking about over the last N days.",
+        "schema": {"type": "object", "properties": {
+            "days": {"type": "integer", "default": 7}},
+        },
+    },
+    "recent_queries": {
+        "fn": t_recent_queries,
+        "description": "Most recent logged queries (newest first) with their "
+                       "topics and files — good for 'what was I studying?'",
+        "schema": {"type": "object", "properties": {
+            "limit": {"type": "integer", "default": 10}},
+        },
+    },
+    "evaluate_answer": {
+        "fn": t_evaluate_answer,
+        "description": "RAGAS-style grading of one Q/A pair: faithfulness, answer "
+                       "relevancy, context precision and recall. Retrieval-only "
+                       "scores when no LLM is configured.",
+        "schema": {"type": "object", "properties": {
+            "question": {"type": "string"},
+            "answer": {"type": "string"},
+            "contexts": {"type": "array", "items": {"type": "string"},
+                         "description": "optional contexts; retrieved if omitted"}},
+            "required": ["question", "answer"]},
+    },
+    "rag_answer": {
+        "fn": t_rag_answer,
+        "description": "One-shot RAG: retrieve passages then answer with the "
+                       "configured LLM (non-streaming). Use for pipeline-style "
+                       "integrations; without an LLM it returns passages + note.",
+        "schema": {"type": "object", "properties": {
+            "question": {"type": "string"},
+            "k": {"type": "integer", "default": 8}},
+            "required": ["question"]},
     },
 }
 

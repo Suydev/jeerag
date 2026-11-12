@@ -27,9 +27,14 @@ export const api = {
   cards: () => jget('/api/cards'),
   addCard: (card) => jpost('/api/cards', card),
   grade: (id, score) => jpost('/api/cards', { action: 'grade', id, score }),
+  deleteCard: (id) => jpost('/api/cards', { action: 'delete', id }),
   tracker: (days) => jget(`/api/tracker?days=${days}`),
   search: (q) => jget(`/api/search?q=${enc(q)}`),
   diagrams: (q) => jget(`/api/diagrams?q=${enc(q)}`),
+  formulas: (q, k = 6) => jget(`/api/formulas?q=${enc(q)}&k=${k}`),
+  recent: (limit = 10) => jget(`/api/recent?limit=${limit}`),
+  page: (file, page) => jget(`/api/page?file=${enc(file)}&page=${page}`),
+  providers: () => jget('/api/providers'),
 };
 
 /**

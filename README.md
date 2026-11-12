@@ -29,10 +29,28 @@ from any OpenAI-compatible endpoint you configure.
   (HTML + CSS design system + ES modules), fully offline — all libraries
   (KaTeX, marked, DOMPurify, fonts) are vendored in `static/vendor/`.
   Extras: ⌘K command palette, dark/light theme with accent colours, chat
-  history persistence, citation chips that open the scanned page, notes/figures
-  search drawer, SM-2 flashcard review, and a study-stats dashboard.
-- **MCP server** — `search_notes`, `get_page`, `get_diagram`, `list_topics`,
-  `index_stats` for any MCP-capable agent (see `AGENTS.md`).
+  history persistence, citation chips that open the scanned page, a
+  notes/figures/formulas search drawer, SM-2 flashcard review, and a
+  study-stats dashboard.
+- **MCP server** — 17 tools for any MCP-capable agent: `search_notes`,
+  `search_notes_advanced` (agentic loop), `search_pyq`, `search_diagrams`,
+  `get_page`, `get_page_context`, `get_diagram`, `harvest_formulas`,
+  `list_topics`, `index_stats`, `add_study_card` / `delete_study_card`,
+  `study_stats`, `recent_queries`, `evaluate_answer` (RAGAS-style grading),
+  `rag_answer` (one-shot retrieve + LLM), `llm_health` (see `AGENTS.md`).
+
+### HTTP API
+
+`GET /api/stats` · `/api/topics?kind=` · `/api/search?q=&kind=` ·
+`/api/diagrams?q=` · `/api/formulas?q=&k=` · `/api/page?file=&page=` ·
+`/api/cards` · `/api/tracker?days=` · `/api/recent?limit=` ·
+`/api/config` · `/api/providers` (LLM endpoint health) · `/api/health`
+(liveness + index + LLM state) · `/pdfpage/<file>/<n>.png` · `/diagrams/<path>`
+
+`POST /api/chat` (SSE stream) · `/api/answer` (one-shot JSON) ·
+`/api/config` (settings; also accepts `llm_temperature`, `llm_top_p`,
+`llm_max_tokens`, `llm_system_prompt`, `llm_provider`, `llm_providers`) ·
+`/api/cards` (add/grade/delete) · `DELETE /api/cards?id=`
 
 ## Web UI layout
 

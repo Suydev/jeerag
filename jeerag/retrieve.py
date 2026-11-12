@@ -51,7 +51,7 @@ def search(question: str, k: int | None = None, kind: str | None = None):
         pass
     if len(hits) < 3:  # topic-name fallback
         first = (re.findall(r"[A-Za-z]{4,}", question) or [""])[0]
-        params = [f"%{first}%", k] + kind_params
+        params = [f"%{first}%"] + kind_params + [k]
         extra = [dict(r) for r in con.execute(
             f"""SELECT c.text, c.topic, c.subject, c.file, c.page, -9.0 AS score
                FROM chunks c JOIN files f ON c.file = f.file
