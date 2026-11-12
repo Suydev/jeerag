@@ -1,5 +1,4 @@
 {
-  "llm_base_url": "http://127.0.0.1:8080/v1",
-  "llm_model": "longcat-2.5-free",
-  "llm_api_key": "alice"
+  "llm_base_url": "",
+  "llm_model": ""
 }

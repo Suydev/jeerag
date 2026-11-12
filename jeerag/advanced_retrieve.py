@@ -204,6 +204,82 @@ def generate_query_variants(query: str, cfg: dict, n: int = 3) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# 2b. Step-Back Prompting (research: RAG_Techniques §6, StackOps AI)
+# ---------------------------------------------------------------------------
+
+STEP_BACK_PROMPT = """You are a query-rewriting assistant for a JEE (IIT-JEE) notes search index.
+
+Given the user's question, write a MORE ABSTRACT, GENERAL version of it that
+captures the underlying concept. This "step-back" query helps retrieve
+foundational passages when the original question is too specific for any
+single chunk to contain the answer.
+
+Rules:
+- Output ONLY the step-back query, no preamble, no explanation.
+- Keep it 4–12 words.
+- Generalize: "What is the minimum force to push a block up a plane?" →
+  "forces on an inclined plane"
+- Preserve the core subject; drop specific numbers / scenario details.
+
+User question: {question}
+
+Step-back query:"""
+
+
+def step_back_query(query: str, cfg: dict) -> str:
+    """Generate a more abstract, general version of the query."""
+    if not llm.configured(cfg):
+        return query
+    prompt = STEP_BACK_PROMPT.format(question=query)
+    text = _llm_chat(
+        [{"role": "user", "content": prompt}], cfg, temperature=0.2
+    )
+    text = text.strip()
+    text = re.sub(r"^(step-back query|query):\s*", "", text, flags=re.I)
+    return text or query
+
+
+# ---------------------------------------------------------------------------
+# 2c. Query Decomposition (research: RAG_Techniques §6)
+# ---------------------------------------------------------------------------
+
+DECOMPOSE_PROMPT = """You are a query decomposition assistant for a JEE (IIT-JEE)
+notes search index.
+
+Given a complex question, break it into {n} simpler SUB-QUESTIONS that each
+target one specific aspect. Each sub-question should be independently
+answerable from a single passage.
+
+Rules:
+- Output exactly {n} lines, one sub-question per line.
+- No numbering, no bullets, no preamble.
+- Each sub-question must be self-contained (3–15 words).
+- If the question is already simple, output it unchanged on one line.
+
+User question: {question}
+
+Sub-questions:"""
+
+
+def decompose_query(query: str, cfg: dict, n: int = 3) -> list[str]:
+    """Break a complex question into simpler sub-questions."""
+    if not llm.configured(cfg):
+        return []
+    prompt = DECOMPOSE_PROMPT.format(n=n, question=query)
+    text = _llm_chat(
+        [{"role": "user", "content": prompt}], cfg, temperature=0.2
+    )
+    subs = []
+    for line in text.splitlines():
+        line = line.strip()
+        line = re.sub(r"^\d+[\.\)]\s*", "", line)
+        line = line.strip("-• ").strip()
+        if 3 <= len(line) <= 80:
+            subs.append(line)
+    return subs[:n]
+
+
+# ---------------------------------------------------------------------------
 # 3. Reciprocal Rank Fusion
 # ---------------------------------------------------------------------------
 
@@ -601,9 +677,30 @@ def _hyde_search(query: str, k: int, kind: str | None, cfg: dict) -> dict:
 
 def _rag_fusion_search(query: str, k: int, kind: str | None, cfg: dict,
                        domain_variants: list[str]) -> dict:
+    """Multi-query RAG + RRF fusion.
+
+    Query variants come from:
+      1. domain synonym expansion (cheap, always)
+      2. LLM paraphrases (multi-query)
+      3. step-back abstraction (for multi-hop / too-specific questions)
+      4. query decomposition (for complex multi-part questions)
+    """
     variants = list(domain_variants)
     llm_variants = generate_query_variants(query, cfg, n=3)
     variants.extend(v for v in llm_variants if v not in variants)
+
+    # Step-back: only for longer / multi-hop questions
+    if len(query.split()) >= 6:
+        sb = step_back_query(query, cfg)
+        if sb and sb.lower() != query.lower() and sb not in variants:
+            variants.append(sb)
+
+    # Decomposition: only for complex questions with multiple parts
+    if len(query.split()) >= 8 or " and " in query.lower() or " or " in query.lower():
+        subs = decompose_query(query, cfg, n=3)
+        for s in subs:
+            if s.lower() != query.lower() and s not in variants:
+                variants.append(s)
 
     per_query: list[list[dict]] = []
     for v in variants:

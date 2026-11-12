@@ -4,6 +4,7 @@ import json
 import mimetypes
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -18,6 +19,45 @@ PAGE_DPI = 120
 PAGE_CACHE_MAX = 50
 _page_cache = collections.OrderedDict()
 _page_lock = threading.Lock()
+
+# --- query result cache (exact-match layer, TTL 24h) ------------------------
+# Research (RAG-Cache, GPTCache): multi-layer cache with exact match first,
+# then semantic match. We implement the exact-match layer (no embeddings).
+# Hit rates for internal-doc QA: 15-30%. TTL 24h for factual content.
+QUERY_CACHE_TTL = 86400  # 24 hours
+QUERY_CACHE_MAX = 500
+_query_cache = collections.OrderedDict()  # key -> (timestamp, result)
+_query_cache_lock = threading.Lock()
+
+
+def _query_cache_key(question: str, kind: str | None) -> str:
+    """Normalized cache key for a query."""
+    import re as _re
+    norm = _re.sub(r"\s+", " ", question.strip().lower())
+    norm = _re.sub(r"[^\w\s]", "", norm)
+    return f"{kind or 'all'}:{norm}"
+
+
+def _query_cache_get(key: str) -> dict | None:
+    """Return cached result if present and not expired."""
+    with _query_cache_lock:
+        entry = _query_cache.get(key)
+        if entry is None:
+            return None
+        ts, result = entry
+        if time.time() - ts > QUERY_CACHE_TTL:
+            _query_cache.pop(key, None)
+            return None
+        _query_cache.move_to_end(key)
+        return result
+
+
+def _query_cache_put(key: str, result: dict) -> None:
+    """Store a query result in the cache."""
+    with _query_cache_lock:
+        _query_cache[key] = (time.time(), result)
+        while len(_query_cache) > QUERY_CACHE_MAX:
+            _query_cache.popitem(last=False)
 
 
 def pdf_path_for(name):
@@ -197,22 +237,36 @@ class Handler(BaseHTTPRequestHandler):
     def chat_stream(self, body):
         question = str(body.get("question", ""))[:2000]
         history = body.get("history") or []
-        # --- Advanced retrieval with agentic follow-loop ---
+        # --- Advanced retrieval with agentic follow-loop (cached) ---
         cfg = config.load()
         top_k = int(cfg.get("top_k", 8))
-        try:
-            ares = advanced_retrieve.advanced_search(
-                question, k=top_k, kind=None, mode="auto", use_loop=True)
-            hits = ares["passages"]
-            diags = ares["diagrams"]
-            method = ares.get("method", "advanced")
-            loops = ares.get("loops", 1)
-        except Exception:
-            # Fallback to basic BM25 if advanced retrieval fails
-            hits = retrieve.search(question)
-            diags = retrieve.diagrams_for(hits)
-            method = "basic_bm25"
-            loops = 1
+        cache_key = _query_cache_key(question, None)
+        cached = _query_cache_get(cache_key)
+        if cached:
+            hits = cached["passages"]
+            diags = cached["diagrams"]
+            method = cached.get("method", "cached") + " (cached)"
+            loops = cached.get("loops", 1)
+        else:
+            try:
+                ares = advanced_retrieve.advanced_search(
+                    question, k=top_k, kind=None, mode="auto", use_loop=True)
+                hits = ares["passages"]
+                diags = ares["diagrams"]
+                method = ares.get("method", "advanced")
+                loops = ares.get("loops", 1)
+                _query_cache_put(cache_key, {
+                    "passages": hits,
+                    "diagrams": diags,
+                    "method": method,
+                    "loops": loops,
+                })
+            except Exception:
+                # Fallback to basic BM25 if advanced retrieval fails
+                hits = retrieve.search(question)
+                diags = retrieve.diagrams_for(hits)
+                method = "basic_bm25"
+                loops = 1
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
