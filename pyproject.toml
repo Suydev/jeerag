@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jeerag"
+version = "0.1.0"
+description = "RAG over scanned JEE physics/maths notes: BM25 search, diagram crops, MCP server, web chat"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "suydev" }]
+keywords = ["rag", "mcp", "retrieval", "ocr", "physics", "jee"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Education",
+]
+dependencies = [
+    "pymupdf>=1.24",
+    "pillow>=10.0",
+    "numpy>=1.24",
+    "pytesseract>=0.3.10",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/suydev/jeerag"
+
+[project.scripts]
+jeerag = "jeerag.cli:main"
+
+[tool.setuptools]
+packages = ["jeerag", "jeerag.llm"]
+
+[tool.setuptools.package-data]
+jeerag = ["static/*.html"]

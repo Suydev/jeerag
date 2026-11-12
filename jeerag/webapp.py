@@ -13,6 +13,7 @@ from . import config, retrieve, advanced_retrieve
 
 STATIC = Path(__file__).parent / "static"
 DATA_DIR = Path(config.load()["data_dir"])
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # --- rendered PDF pages: bounded in-memory LRU (never touches disk) ----------
 PAGE_DPI = 120
@@ -150,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(u.query).get("q", [""])[0]
             kind = parse_qs(u.query).get("kind", [None])[0]
             hits = retrieve.search(q, kind=kind)
+            from .tracker import log_query
+            log_query(q, hits, "search")
             self._json({"passages": hits, "diagrams": retrieve.diagrams_for(hits)})
         elif u.path == "/api/diagrams":
             q = parse_qs(u.query).get("q", [""])[0]
@@ -161,6 +164,9 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/cards":
             from . import review
             self._json({"due": review.due(), "stats": review.stats()})
+        elif u.path == "/api/tracker":
+            from .tracker import summary
+            self._json(summary(int(parse_qs(u.query).get("days", ["7"])[0])))
         elif u.path.startswith("/pdfpage/"):
             # /pdfpage/<url-encoded file>/<1-based page>.png
             rest = u.path[len("/pdfpage/"):]
@@ -281,6 +287,8 @@ class Handler(BaseHTTPRequestHandler):
 
         send("context", {"passages": hits, "diagrams": diags,
                          "method": method, "loops": loops})
+        from .tracker import log_query
+        log_query(question, hits, "chat")
         cfg = config.load()
         if not (cfg.get("llm_base_url") or "").strip():
             send("no_llm", {"message": "No LLM endpoint configured — showing "

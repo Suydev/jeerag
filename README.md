@@ -1,5 +1,7 @@
 # jeerag — RAG for scanned JEE notes
 
+[![CI](https://github.com/suydev/jeerag/actions/workflows/ci.yml/badge.svg)](https://github.com/suydev/jeerag/actions/workflows/ci.yml)
+
 Ask questions over 73 scanned PDFs of **Ambarish Sir**'s IIT-JEE physics &
 maths notes (2,279 pages). Works fully offline for retrieval; answers stream
 from any OpenAI-compatible endpoint you configure.
@@ -30,8 +32,19 @@ from any OpenAI-compatible endpoint you configure.
 ## Install
 
 ```bash
-python3 install.py          # venv + deps + index (first run indexes ~73 PDFs)
-python3 -m jeerag.webapp    # → open http://127.0.0.1:8613
+pip install jeerag           # or: python3 install.py (venv + deps + index)
+jeerag web                   # → open http://127.0.0.1:8613
+jeerag ask "cone of static friction"
+jeerag index                 # first run indexes ~73 PDFs (resumable)
+```
+
+CLI subcommands: `index` `ask` `web` `mcp` `review` `formulas` `caption` `eval`.
+
+From source (this repo):
+
+```bash
+python3 install.py           # venv + deps + index
+python3 -m jeerag.webapp     # → open http://127.0.0.1:8613
 python3 ask.py "cone of static friction"
 ```
 

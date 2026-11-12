@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install (code only, no data)
+        run: pip install .
+      - name: CLI smoke
+        run: jeerag --help
+      - name: Syntax check all modules
+        run: python -m compileall jeerag
+      - name: Retrieval smoke (synthetic index)
+        run: python tests/test_synthetic.py

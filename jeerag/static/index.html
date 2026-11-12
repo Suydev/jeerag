@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="JEE RAG">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="icon" href="/static/icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 <title>JEE Notes RAG — Ambarish Sir</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
       integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
@@ -80,6 +88,25 @@ body.sidebar-open #log{filter:blur(1px);pointer-events:none}
   #right{width:100%}
   body.sidebar-open #log{position:fixed;top:0;left:0;right:0;bottom:0;overflow:hidden}
 }
+
+/* ---------- Answer action buttons (Save to Deck / Open page) ---------- */
+#log .act{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+#log .act button{background:var(--chip);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+
+/* ---------- Figures gallery ---------- */
+#log .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px}
+#log .gal figure{margin:0;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px}
+#log .gal figure img{width:100%;border-radius:4px;background:#fff;cursor:pointer}
+#log .gal figcaption{font-size:11px;color:var(--dim);margin-top:6px;overflow-wrap:break-word}
+
+/* ---------- Page viewer ---------- */
+#pageview img{max-width:96vw;max-height:96vh;border-radius:8px;background:#fff;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+
+/* ---------- Focus + hover states (a11y) ---------- */
+button:focus-visible,textarea:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+textarea:focus{border-color:var(--acc)}
+header button:hover,.card .g button:hover,#log .act button:hover{border-color:var(--acc)}
+button.send:not(:disabled):hover{filter:brightness(1.1)}
 
 /* ---------- Scrollbar ---------- */
 ::-webkit-scrollbar{width:8px;height:8px}
@@ -249,9 +276,9 @@ function renderCitations(diagrams){
   const list=document.getElementById('rightList');
   list.innerHTML = diagrams.map(d=>
     '<div class="src">'+
-      '<div class="chip">'+(g.file)+' · p.'+g.page+'</div>'+
-      '<div class="text">'+(g.caption||'').slice(0,200)+'</div>'+
-      (g.path?'<img src="'+g.url+'" alt="figure">':'')+
+      '<div class="chip">'+(d.file)+' · p.'+d.page+'</div>'+
+      '<div class="text">'+(d.caption||'').slice(0,200)+'</div>'+
+      (d.path?'<img src="'+d.url+'" alt="figure">':'')+
     '</div>'
   ).join('');
 }
