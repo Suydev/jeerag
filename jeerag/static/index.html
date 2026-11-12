@@ -1,343 +1,225 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark" data-accent="teal">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0f1115">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="JEE RAG">
-<link rel="manifest" href="/static/manifest.webmanifest">
-<link rel="icon" href="/static/icons/icon-192.png" sizes="192x192">
-<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-<title>JEE Notes RAG — Ambarish Sir</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
-      integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
-<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
-        integrity="sha384-43gviWU0YVjaDtb/GhzOouOXtZMP/7XUzwPTstBeZFe/+rCMvRwr4yROQP43s0Xk" crossorigin="anonymous"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
-        integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
-<style>
-:root{--bg:#0f1115;--panel:#171a21;--border:#2a2f3a;--fg:#e6e8ee;--dim:#9aa3b2;--acc:#5eead4;--chip:#22303a;--danger:#ef4444;--ok:#22c55e}
-* { box-sizing:border-box }
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,sans-serif;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d12">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="JEE RAG">
+  <meta name="description" content="Ask questions over Ambarish Sir's scanned JEE physics & maths notes — retrieval, LaTeX, diagrams, spaced repetition.">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" href="/static/icons/icon-192.png" sizes="192x192">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <title>JEE Notes RAG — Ambarish Sir</title>
 
-/* ---------- Header ---------- */
-header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--panel);z-index:20}
-header b{font-size:16px}
-header .sub{color:var(--dim);font-size:12px;flex:1}
-header button{background:var(--chip);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;cursor:pointer}
-header .right{display:flex;gap:6px}
+  <link rel="stylesheet" href="/static/vendor/katex.min.css">
+  <link rel="stylesheet" href="/static/css/fonts.css">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <link rel="stylesheet" href="/static/css/chat.css">
+  <link rel="stylesheet" href="/static/css/panels.css">
 
-/* ---------- Thread (assistant-ui pattern) ---------- */
-#log{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;max-width:900px;width:100%;margin:0 auto;position:relative}
-#log::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--border);z-index:0;opacity:.3}
-#log .msg{position:relative;z-index:1;padding:12px 14px;border-radius:12px;white-space:normal;overflow-wrap:break-word;max-width:85%}
-#log .msg.user{background:#1c2733;align-self:flex-end;color:var(--fg)}
-#log .msg.assistant{background:var(--panel);border:1px solid var(--border);align-self:flex-start;color:var(--fg)}
-#log .msg.assistant table{border-collapse:collapse;margin:8px 0}
-#log .msg.assistant th,.msg.assistant td{border:1px solid var(--border);padding:4px 10px}
-#log .msg.assistant img{max-width:100%;border-radius:8px;margin:6px 0;background:#fff}
-#log .msg.assistant pre{background:#0b0d11;padding:10px;border-radius:8px;overflow-x:auto}
-#log .srcs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
-#log .src{background:var(--chip);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--acc)}
-#log .ctx{margin-top:8px;font-size:12px;color:var(--dim)}
-#log .ctx details{margin:4px 0}
-#log .ctx summary{cursor:pointer;color:var(--fg)}
-
-/* streaming deltas get a slight fade-in */
-#log .msg.assistant .delta{opacity:.92}
-
-/* ---------- Footer / Composer ---------- */
-footer{padding:12px 14px;border-top:1px solid var(--border);background:var(--panel);z-index:20}
-.inrow{display:flex;gap:8px;max-width:900px;margin:0 auto;width:100%}
-textarea{flex:1;resize:none;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;height:52px}
-button.send{background:var(--acc);color:#082b26;border:0;border-radius:10px;padding:0 18px;font-weight:600;cursor:pointer}
-button.send.stop{background:var(--danger);color:#fff}
-button.send:disabled{opacity:0.6;cursor:not-allowed}
-
-/* ---------- Panels (settings, deck, pageview) ---------- */
-#settings,#deck,#pageview{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:30}
-#settings .box,#deck .box{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px;width:min(520px,94vw);max-height:90vh;overflow:auto}
-#settings label,#deck label{display:block;font-size:13px;color:var(--dim);margin:10px 0 4px}
-#settings input,#deck input{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:8px;font:inherit}
-#settings .row,#deck .row{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
-.small{font-size:12px;color:var(--dim)}
-.pill{font-size:11px;background:var(--chip);padding:2px 8px;border-radius:99px;color:var(--dim)}
-.card{border:1px solid var(--border);border-radius:10px;padding:12px;margin:10px 0;background:var(--bg)}
-.card .q{font-weight:600;margin-bottom:6px}
-.card .a{border-left:3px solid var(--acc);padding-left:10px;color:var(--fg);white-space:pre-wrap}
-.card .g{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-.card .g button{background:var(--chip);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer}
-.card img{max-width:200px;border-radius:6px;margin-top:8px;background:#fff}
-
-/* ---------- Right sidebar citations ---------- */
-#right{position:fixed;right:-420px;top:0;bottom:0;width:420px;border-left:1px solid var(--border);background:var(--panel);z-index:25;transition:right .25s;overflow:auto}
-#right.open{right:0}
-#right .box{padding:16px}
-#right h2{font-size:14px;margin:0 0 12px;color:var(--dim)}
-#right .src{display:flex;align-items:flex-start;gap:8px;margin:8px 0;padding:8px;background:var(--bg);border-radius:8px;font-size:12px}
-#right .src .chip{font-weight:600;color:var(--acc)}
-#right .src .text{color:var(--dim);font-size:11.5px}
-#right .src img{max-width:100%;border-radius:4px;margin-top:6px}
-#right .close{position:absolute;top:10px;right:12px;background:var(--chip);border:none;border-radius:8px;padding:4px 10px;color:var(--fg);cursor:pointer}
-body.sidebar-open #log{filter:blur(1px);pointer-events:none}
-
-@media (max-width:768px){
-  #right{width:100%}
-  body.sidebar-open #log{position:fixed;top:0;left:0;right:0;bottom:0;overflow:hidden}
-}
-
-/* ---------- Answer action buttons (Save to Deck / Open page) ---------- */
-#log .act{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
-#log .act button{background:var(--chip);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
-
-/* ---------- Figures gallery ---------- */
-#log .gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:8px}
-#log .gal figure{margin:0;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px}
-#log .gal figure img{width:100%;border-radius:4px;background:#fff;cursor:pointer}
-#log .gal figcaption{font-size:11px;color:var(--dim);margin-top:6px;overflow-wrap:break-word}
-
-/* ---------- Page viewer ---------- */
-#pageview img{max-width:96vw;max-height:96vh;border-radius:8px;background:#fff;box-shadow:0 8px 40px rgba(0,0,0,.5)}
-
-/* ---------- Focus + hover states (a11y) ---------- */
-button:focus-visible,textarea:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-textarea:focus{border-color:var(--acc)}
-header button:hover,.card .g button:hover,#log .act button:hover{border-color:var(--acc)}
-button.send:not(:disabled):hover{filter:brightness(1.1)}
-
-/* ---------- Scrollbar ---------- */
-::-webkit-scrollbar{width:8px;height:8px}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
-::-webkit-scrollbar-thumb:hover{background:var(--dim)}
-</style>
+  <script defer src="/static/vendor/purify.min.js"></script>
+  <script defer src="/static/vendor/katex.min.js"></script>
+  <script defer src="/static/vendor/marked.min.js"></script>
+  <script defer src="/static/vendor/auto-render.min.js"></script>
 </head>
 <body>
-<header>
-  <b>JEE Notes RAG</b>
-  <span class="pill" id="statpill">…</span>
-  <span class="sub">Ambarish Sir notes · LaTeX rendered · <a href="https://www.youtube.com/@ambarishphysics" target="_blank" style="color:var(--dim)">credit</a></span>
-  <span class="right">
-    <button onclick="openDeck()">🃏 Deck <span class="pill" id="duen">0</span></button>
-    <button onclick="openSettings()">⚙ Settings</button>
-    <button id="citeBtn" onclick="toggleCitations()" style="background:var(--chip);color:var(--fg);border:none;border-radius:8px;padding:6px 10px;cursor:pointer">📚 Citations</button>
-  </span>
-</header>
+  <a class="skip" href="#log">Skip to chat</a>
 
-<main id="log"></main>
+  <!-- ================= Top bar ================= -->
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></svg>
+      </span>
+      <div class="brand-txt">
+        <b>JEE Notes RAG</b>
+        <span class="sub">Ambarish Sir · scanned notes</span>
+      </div>
+    </div>
 
-<!-- Right sidebar: citations for current answer -->
-<div id="right">
-  <button class="close" onclick="toggleCitations()">✕</button>
-  <h2>Citations</h2>
-  <div id="rightList"></div>
-</div>
+    <button id="statpill" class="pill ghost" title="Index statistics" data-icon="db"><span>…</span></button>
 
-<footer>
-  <div class="inrow">
-    <textarea id="q" placeholder="Ask anything from your notes… e.g. cone of static friction"></textarea>
-    <button class="send" id="sendBtn" onclick="ask()">Ask</button>
-    <button class="send" style="background:var(--chip);color:var(--fg)" onclick="figures()">🖼</button>
+    <div class="spacer"></div>
+
+    <nav class="actions" aria-label="App actions">
+      <button id="btnPalette" class="icon" title="Command palette (Ctrl K)" aria-label="Command palette" data-icon="cmd"></button>
+      <button id="btnSearch"  class="icon" title="Search notes" aria-label="Search notes" data-icon="search"></button>
+      <button id="btnStats"   class="icon" title="Study stats" aria-label="Study stats" data-icon="chart"></button>
+      <button id="btnDeck"    class="icon" title="Doubt Deck" aria-label="Doubt Deck" data-icon="deck">
+        <span id="duen" class="badge-dot" hidden>0</span>
+      </button>
+      <button id="btnTheme"   class="icon" title="Toggle theme" aria-label="Toggle theme" data-icon="moon"></button>
+      <button id="btnSettings" class="icon" title="Settings" aria-label="Settings" data-icon="gear"></button>
+    </nav>
+  </header>
+
+  <!-- ================= Chat log ================= -->
+  <main id="log" aria-live="polite" aria-label="Chat">
+    <section id="welcome" class="welcome">
+      <div class="hero-orb" aria-hidden="true">
+        <span class="orb-ring"></span><span class="orb-ring r2"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></svg>
+      </div>
+      <h1>Ask your notes <span class="grad">anything</span></h1>
+      <p class="lede">2,279 scanned pages, indexed. Answers cite <em>(file, p.N)</em> and
+        arrive with the original diagrams — rendered math included.</p>
+      <div class="chips" role="list">
+        <button class="chip" role="listitem" data-q="Cone of static friction — derive the self-locking condition">Cone of static friction — self-locking</button>
+        <button class="chip" role="listitem" data-q="Explain Bernoulli's theorem and its limitations">Bernoulli's theorem + limitations</button>
+        <button class="chip" role="listitem" data-q="Compare SHM and general oscillations in a table">SHM vs oscillations (table)</button>
+        <button class="chip" role="listitem" data-q="Surface energy and surface tension — derivation">Surface energy derivation</button>
+      </div>
+      <p class="hint-row"><kbd>Enter</kbd> send · <kbd>Shift</kbd><kbd>Enter</kbd> newline · <kbd>Ctrl</kbd><kbd>K</kbd> commands</p>
+      <p class="credit">Notes by <a href="https://www.youtube.com/@ambarishphysics" target="_blank" rel="noopener">Ambarish Sir</a> · indexed locally for personal study</p>
+    </section>
+  </main>
+
+  <button id="scrollDown" class="scroll-pill" hidden aria-label="Scroll to latest">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+         stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m7-7-7 7-7-7"/></svg>
+  </button>
+
+  <!-- ================= Composer ================= -->
+  <footer id="composer">
+    <div class="comp" role="form" aria-label="Ask a question">
+      <button id="btnFigures" class="icon subtle" title="Find figures in your notes" aria-label="Find figures" data-icon="image"></button>
+      <textarea id="q" rows="1" placeholder="Ask anything from your notes…" spellcheck="true"></textarea>
+      <button id="sendBtn" class="send" aria-label="Ask">
+        <svg id="icSend" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 14-7-4.5 14L11 13l-6-1Z"/></svg>
+        <svg id="icStop" viewBox="0 0 24 24" fill="currentColor" hidden><rect x="7" y="7" width="10" height="10" rx="2"/></svg>
+        <span id="sendLabel">Ask</span>
+      </button>
+    </div>
+    <p class="hint">Answers come only from the notes — always check the cited scan. <kbd>Enter</kbd> to send.</p>
+  </footer>
+
+  <!-- ================= Right drawer: citations / search ================= -->
+  <div id="scrim" hidden></div>
+  <aside id="drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Citations panel">
+    <div class="drawer-head">
+      <h2 id="drawerTitle">Citations</h2>
+      <button id="drawerClose" class="icon" aria-label="Close panel" data-icon="x"></button>
+    </div>
+    <div id="drawerBody" class="drawer-body"></div>
+  </aside>
+
+  <!-- ================= Page viewer ================= -->
+  <div id="pageview" hidden role="dialog" aria-modal="true" aria-label="Scanned page">
+    <div class="pv-inner">
+      <div class="pv-bar">
+        <span id="pvCap" class="pill">page</span>
+        <span class="spacer"></span>
+        <button id="pvPrev" class="icon" aria-label="Previous page" data-icon="chevL"></button>
+        <button id="pvNext" class="icon" aria-label="Next page" data-icon="chevR"></button>
+        <button id="pvClose" class="icon" aria-label="Close viewer" data-icon="x"></button>
+      </div>
+      <div class="pv-stage"><div id="pvLoad" class="spinner" hidden></div>
+        <img id="pvImg" alt="Scanned note page"></div>
+    </div>
   </div>
-</footer>
 
-<!-- Doubt Deck -->
-<div id="deck"><div class="box">
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <b>🃏 Doubt Deck</b><span class="small" id="deckstats"></span>
-    <button onclick="closeDeck()">Close</button>
+  <!-- ================= Settings ================= -->
+  <div id="modal-settings" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <div class="modal-card lg">
+      <div class="modal-head">
+        <h2 id="setTitle">Settings</h2>
+        <button class="icon" data-close aria-label="Close" data-icon="x"></button>
+      </div>
+      <div class="modal-body">
+        <section>
+          <h3>Appearance</h3>
+          <div class="seg" id="segTheme" role="radiogroup" aria-label="Theme">
+            <button role="radio" data-theme-set="dark" aria-checked="true">Dark</button>
+            <button role="radio" data-theme-set="light" aria-checked="false">Light</button>
+          </div>
+          <div class="swatches" id="accents" role="radiogroup" aria-label="Accent colour"></div>
+        </section>
+        <section>
+          <h3>LLM endpoint</h3>
+          <label class="field"><span>Base URL (OpenAI-compatible)</span>
+            <input id="s_base" type="url" placeholder="http://127.0.0.1:8787/v1" autocomplete="off"></label>
+          <label class="field"><span>Model</span>
+            <input id="s_model" type="text" placeholder="e.g. qwen2.5-14b-instruct" autocomplete="off"></label>
+          <label class="field"><span>API key</span>
+            <span class="keywrap">
+              <input id="s_key" type="password" placeholder="(none saved)" autocomplete="off">
+              <button id="s_show" class="icon subtle" aria-label="Show key" data-icon="eye"></button>
+            </span></label>
+          <label class="field"><span>Passages per question</span>
+            <select id="s_topk">
+              <option>4</option><option>6</option><option selected>8</option><option>10</option><option>12</option>
+            </select></label>
+          <p class="small">No endpoint set? The UI still shows retrieved passages and diagrams — retrieval-only mode.</p>
+        </section>
+        <section>
+          <h3>About</h3>
+          <p class="small">JEE Notes RAG · BM25 over SQLite FTS5 · diagram crops · SM-2 doubt deck.
+            All note content by <a href="https://www.youtube.com/@ambarishphysics" target="_blank" rel="noopener">Ambarish Sir</a>
+            (youtube.com/@ambarishphysics). Not affiliated.</p>
+        </section>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" data-close>Cancel</button>
+        <button id="s_save" class="btn primary">Save changes</button>
+      </div>
+    </div>
   </div>
-  <div class="small" style="margin-top:6px">Cards you saved from answers, scheduled by SM-2. Grade what you recall: 0-2 forgot, 3 hard, 4 good, 5 easy.</div>
-  <div id="decklist"></div>
-</div></div>
 
-<!-- Page viewer -->
-<div id="pageview" onclick="this.style.display='none'"><img id="pageimg" alt="note page"></div>
+  <!-- ================= Doubt Deck ================= -->
+  <div id="modal-deck" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="deckTitle">
+    <div class="modal-card lg">
+      <div class="modal-head">
+        <h2 id="deckTitle">Doubt Deck</h2>
+        <div class="spacer"></div>
+        <button class="icon" data-close aria-label="Close" data-icon="x"></button>
+      </div>
+      <div class="modal-body">
+        <div id="deckStats" class="stat-chips"></div>
+        <div id="deckArea"></div>
+      </div>
+    </div>
+  </div>
 
-<script>
-const log = document.getElementById('log');
-let history = [], lastCtx = null;
-marked && (marked.setOptions({breaks:true}));
+  <!-- ================= Study stats ================= -->
+  <div id="modal-stats" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+    <div class="modal-card md">
+      <div class="modal-head">
+        <h2 id="statsTitle">Study stats</h2>
+        <div class="spacer"></div>
+        <select id="statsDays" aria-label="Period">
+          <option value="7" selected>Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+        <button class="icon" data-close aria-label="Close" data-icon="x"></button>
+      </div>
+      <div class="modal-body" id="statsArea"></div>
+    </div>
+  </div>
 
-// ---------- Chat state machine (research: OpenTranscribe RAG Chat plan) ---
-// idle → submitting → retrieving → thinking → streaming → done
-let chatState = 'idle';
-let activeController = null;
-let activeBox = null;
+  <!-- ================= Command palette ================= -->
+  <div id="palette" hidden role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="pal">
+      <div class="pal-in">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="palQ" type="text" placeholder="Type a command or question…" autocomplete="off" spellcheck="false">
+        <kbd>esc</kbd>
+      </div>
+      <div id="palList" class="pal-list" role="listbox"></div>
+      <div class="pal-foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> run</span><span><kbd>esc</kbd> close</span></div>
+    </div>
+  </div>
 
-function setState(s) {
-  chatState = s;
-  const btn = document.getElementById('sendBtn');
-  const q = document.getElementById('q');
-  if (s === 'idle') {
-    btn.textContent = 'Ask';
-    btn.classList.remove('stop');
-    q.disabled = false;
-  } else {
-    btn.textContent = '⏹ Stop';
-    btn.classList.add('stop');
-    q.disabled = (s !== 'idle');
-  }
-}
+  <div id="toasts" aria-live="polite"></div>
 
-function el(cls, html){const d=document.createElement('div');d.className=cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
-function math(d){renderMathInElement(d,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],throwOnError:false})}
-
-function stopGeneration() {
-  if (activeController) {
-    activeController.abort();
-    setState('idle');
-    if (activeBox) {
-      const note = document.createElement('div');
-      note.className = 'small';
-      note.textContent = '⏹ Stopped by user.';
-      activeBox.appendChild(note);
-    }
-    activeController = null; activeBox = null;
-  }
-}
-
-async function ask(){
-  if (chatState !== 'idle') { stopGeneration(); return; }
-  const q=document.getElementById('q');const text=q.value.trim();if(!text)return;
-  q.value='';
-  setState('submitting');
-
-  // optimistic user message
-  el('msg user',text.replace(/</g,'&lt;'));
-  const box=el('msg assistant','<span class="small">retrieving notes…</span>');
-  activeBox = box;
-
-  activeController = new AbortController();
-  const res=await fetch('/api/chat',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({question:text,history}),
-    signal: activeController.signal,
-  });
-  setState('retrieving');
-  const reader=res.body.getReader();const dec=new TextDecoder();let buf='',answer='',ctxHtml='';
-  const pump=()=>{
-    box.innerHTML=(answer?marked.parse(answer):'<span class="small">no LLM answer — see retrieved passages below</span>')+ctxHtml;
-    math(box);log.scrollTop=log.scrollHeight;
-  };
-  try {
-    while(true){
-      const{value,done}=await reader.read();if(done)break;
-      buf+=dec.decode(value,{stream:true});
-      let i;
-      while((i=buf.indexOf('\n\n'))>=0){
-        const ev=buf.slice(0,i);buf=buf.slice(i+2);
-        const m=ev.match(/^event: (\w+)\ndata: (.*)$/s);if(!m)continue;
-        const d=JSON.parse(m[2]);
-        if(m[1]==='context'){
-          setState('thinking');
-          lastCtx=d;
-          renderCitations(d.diagrams||[]);
-          ctxHtml='<div class="ctx"><details><summary>📄 '+d.passages.length+' passages from your notes</summary>'+
-            d.passages.map(p=>'<div class="srcs"><span class="src">'+p.file+' · p.'+p.page+' · '+p.topic+'</span></div><div>'+p.text.slice(0,400).replace(/</g,'&lt;')+'…</div>').join('')+
-            '</details>'+(d.diagrams.length?'<div>'+d.diagrams.map(g=>'<img src="'+g.url+'" alt="diagram p.'+g.page+' ('+g.file+')"><div class="small">diagram · '+g.file+' p.'+g.page+'</div>').join('')+'</div>':'')+'</div>';
-          if(!answer)pump();
-        }else if(m[1]==='delta'){setState('streaming');answer+=d.t;pump();}
-        else if(m[1]==='no_llm'||m[1]==='error'){answer=answer||'';ctxHtml+='<div class="small">'+(d.message||'')+'</div>';pump();}
-        else if(m[1]==='done'){
-          setState('done');
-          pump();history.push({role:'user',content:text});history.push({role:'assistant',content:answer});
-          if(answer&&lastCtx){
-            const g=lastCtx.diagrams&&lastCtx.diagrams[0];
-            const act=document.createElement('div');act.className='act';
-            act.innerHTML='<button>🃏 Save to Deck</button>'+(g?'<button>📄 Open p.'+g.page+'</button>':'');
-            act.children[0].onclick=()=>saveCard(text,answer,g?g.file:null,g?g.page:null,g?g.path:null,g?g.topic:null);
-            if(g)act.children[1].onclick=()=>showPage(g.file,g.page);
-            box.appendChild(act);
-          }
-          setState('idle');
-          activeController = null; activeBox = null;
-        }
-      }
-    }
-  } catch (e) {
-    if (e.name === 'AbortError') {
-      // stopped by user — partial content preserved
-    } else {
-      box.innerHTML += '<div class="small">Error: ' + (e.message||e) + '</div>';
-      setState('idle');
-    }
-  }
-}
-setState('idle');
-document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();ask()}});
-document.getElementById('sendBtn').addEventListener('click',ask);
-
-// ---------- Citations sidebar (right panel) ----------
-function renderCitations(diagrams){
-  const list=document.getElementById('rightList');
-  list.innerHTML = diagrams.map(d=>
-    '<div class="src">'+
-      '<div class="chip">'+(d.file)+' · p.'+d.page+'</div>'+
-      '<div class="text">'+(d.caption||'').slice(0,200)+'</div>'+
-      (d.path?'<img src="'+d.url+'" alt="figure">':'')+
-    '</div>'
-  ).join('');
-}
-function toggleCitations(){
-  const r=document.getElementById('right');
-  r.classList.toggle('open');
-  document.body.classList.toggle('sidebar-open');
-}
-function showPage(file,page){pageimg.src='/pdfpage/'+encodeURIComponent(file)+'/'+page+'.png';document.getElementById('pageview').style.display='flex'}
-function saveCard(q,a,file,page,diagram,topic){
-  fetch('/api/cards',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({question:q,answer:a,file,page,diagram,topic})})
-    .then(r=>r.json()).then(()=>{refreshDeckCount();alert('Saved to Doubt Deck — review it tomorrow.')});
-}
-
-// ---------- Figures (diagram search) ----------
-async function figures(){
-  const q=document.getElementById('q');const text=q.value.trim();if(!text)return;
-  q.value='';el('msg user','🖼 '+text.replace(/</g,'&lt;'));
-  const box=el('msg assistant','<span class="small">searching figures…</span>');
-  const d=await(await fetch('/api/diagrams?q='+encodeURIComponent(text))).json();
-  box.innerHTML=d.diagrams.length?('<div class="small">'+d.diagrams.length+' figures</div><div class="gal">'+
-    d.diagrams.map(g=>'<figure><img src="'+g.url+'" onclick="showPage(\''+g.file.replace(/'/g,"\\'")+'\','+g.page+')" alt="figure"><figcaption>'+g.file+' · p.'+g.page+'<br>'+(g.caption||'').slice(0,90)+'</figcaption></figure>').join('')+'</div>')
-    :'<span class="small">no figures matched — run python -m jeerag.caption first</span>';
-}
-
-// ---------- Doubt Deck ----------
-async function openDeck(){
-  document.getElementById('deck').style.display='flex';
-  const d=await(await fetch('/api/cards')).json();
-  document.getElementById('deckstats').textContent=d.stats.total+' cards · '+d.stats.due_today+' due · '+d.stats.mature+' mature';
-  const list=document.getElementById('decklist');
-  if(!d.due.length){list.innerHTML='<div class="small" style="margin-top:12px">Nothing due. Save answers with "🃏 Save" under any reply.</div>';return}
-  list.innerHTML=d.due.map(c=>'<div class="card"><div class="q">'+(c.question||'').replace(/</g,'&lt;')+'</div>'+
-    '<div class="a">'+marked.parse(c.answer||'')+'</div>'+
-    (c.diagram?'<img src="/'+c.diagram+'" onclick="showPage(\''+c.file.replace(/'/g,"\\'")+'\','+c.page+')">':'')+
-    '<div class="small">'+(c.file?c.file+' · p.'+c.page:'')+(c.topic?' · '+c.topic:'')+'</div>'+
-    '<div class="g">'+[0,2,3,4,5].map(sc=>'<button onclick="grade('+c.id+','+sc+')">'+(sc<3?'forgot':sc===3?'hard':sc===4?'good':'easy')+'</button>').join('')+'</div></div>').join('');
-  math(list);
-}
-function closeDeck(){document.getElementById('deck').style.display='none'}
-async function grade(id,score){
-  await fetch('/api/cards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'grade',id,score})});
-  openDeck();
-}
-async function refreshDeckCount(){try{const d=await(await fetch('/api/cards')).json();document.getElementById('duen').textContent=d.stats.due_today}catch(e){}}
-async function openSettings(){close0();const c=await(await fetch('/api/config')).json();
-  s_base.value=c.llm_base_url||'';s_model.value=c.llm_model||'';s_key.value=c.llm_api_key_set?'(saved ••••••)':'';
-  document.getElementById('settings').style.display='flex'}
-function close0(){document.getElementById('settings').style.display='none'}
-const closeSettings=close0;
-async function saveSettings(){
-  const body={llm_base_url:s_base.value.trim(),llm_model:s_model.value.trim()};
-  if(s_key.value&&!s_key.value.startsWith('(saved'))body.llm_api_key=s_key.value.trim();
-  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  close0()}
-(async()=>{try{const s=await(await fetch('/api/stats')).json();
-  statpill.textContent=s.files+' PDFs · '+s.pages+' pages · '+s.diagrams+' diagrams'}catch(e){statpill.textContent='offline'}
-  refreshDeckCount()})();
-</script>
+  <script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

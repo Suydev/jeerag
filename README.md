@@ -25,9 +25,27 @@ from any OpenAI-compatible endpoint you configure.
 - **Retrieval** — SQLite FTS5 BM25, topic-name fallback, diagram lookup per hit.
 - **Web chat UI** — localhost page with KaTeX-rendered math, Markdown tables,
   inline diagram images, source citations, streaming answers, settings panel
-  for your LLM endpoint.
+  for your LLM endpoint. Zero-build modular frontend under `jeerag/static/`
+  (HTML + CSS design system + ES modules), fully offline — all libraries
+  (KaTeX, marked, DOMPurify, fonts) are vendored in `static/vendor/`.
+  Extras: ⌘K command palette, dark/light theme with accent colours, chat
+  history persistence, citation chips that open the scanned page, notes/figures
+  search drawer, SM-2 flashcard review, and a study-stats dashboard.
 - **MCP server** — `search_notes`, `get_page`, `get_diagram`, `list_topics`,
   `index_stats` for any MCP-capable agent (see `AGENTS.md`).
+
+## Web UI layout
+
+```
+jeerag/static/
+├── index.html          markup only
+├── css/                tokens (themes/accents) · base · components · chat · panels
+├── js/                 ui · store · api · markdown · chat · panels · palette · toasts · theme · main
+└── vendor/             KaTeX + marked + DOMPurify + fonts (served locally)
+```
+
+Shortcuts: `Enter` send · `Shift+Enter` newline · `Ctrl/⌘K` command palette ·
+`Ctrl/⌘/` focus composer · `Esc` close topmost panel.
 
 ## Install
 

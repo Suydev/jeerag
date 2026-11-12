@@ -1,0 +1,93 @@
+/* ==========================================================================
+   tokens.css — design tokens: themes, accents, type, space, elevation
+   ========================================================================== */
+
+:root {
+  /* dark theme (default) */
+  --bg: #0b0d12;
+  --panel: #12151c;
+  --panel-2: #171b24;
+  --raised: #1c212c;
+  --border: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --fg: #e8ebf2;
+  --dim: #98a2b3;
+  --faint: #5d6577;
+  --danger: #f87171;
+  --ok: #34d399;
+  --warn: #fbbf24;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 32px -12px rgba(0, 0, 0, 0.55);
+  --shadow-3: 0 24px 64px -24px rgba(0, 0, 0, 0.7);
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #f4f6f8;
+  --panel: #ffffff;
+  --panel-2: #f8fafc;
+  --raised: #ffffff;
+  --border: rgba(15, 23, 42, 0.09);
+  --border-strong: rgba(15, 23, 42, 0.18);
+  --fg: #0f172a;
+  --dim: #5b6577;
+  --faint: #94a3b8;
+  --danger: #dc2626;
+  --ok: #059669;
+  --warn: #d97706;
+
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-2: 0 12px 32px -12px rgba(15, 23, 42, 0.18);
+  --shadow-3: 0 24px 64px -24px rgba(15, 23, 42, 0.28);
+
+  color-scheme: light;
+}
+
+/* ---- accents (soft variants derive automatically via color-mix) ---- */
+:root, [data-accent="teal"]   { --acc: #2dd4bf; --acc-fg: #04211d; }
+[data-accent="indigo"]        { --acc: #818cf8; --acc-fg: #10123a; }
+[data-accent="rose"]          { --acc: #fb7185; --acc-fg: #340b10; }
+[data-accent="amber"]         { --acc: #fbbf24; --acc-fg: #2a1c02; }
+
+[data-theme="light"][data-accent="teal"]   { --acc: #0d9488; --acc-fg: #ffffff; }
+[data-theme="light"][data-accent="indigo"] { --acc: #4f46e5; --acc-fg: #ffffff; }
+[data-theme="light"][data-accent="rose"]   { --acc: #e11d48; --acc-fg: #ffffff; }
+[data-theme="light"][data-accent="amber"]  { --acc: #b45309; --acc-fg: #ffffff; }
+
+:root {
+  --acc-soft: color-mix(in srgb, var(--acc) 14%, transparent);
+  --acc-softer: color-mix(in srgb, var(--acc) 7%, transparent);
+  --acc-line: color-mix(in srgb, var(--acc) 35%, transparent);
+  --grad: linear-gradient(135deg, var(--acc), color-mix(in srgb, var(--acc) 55%, #6366f1));
+}
+
+/* ---- type ---- */
+:root {
+  --font: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --fs-0: 15px;      /* body */
+  --fs--1: 13px;     /* small */
+  --fs--2: 11.5px;   /* chips, captions */
+  --fs-1: 17px;      /* h2 */
+  --fs-2: 22px;      /* h1 welcome */
+  --fs-3: 30px;      /* hero */
+
+  --r-s: 8px;
+  --r-m: 12px;
+  --r-l: 16px;
+  --r-xl: 22px;
+
+  --z-top: 20;
+  --z-drawer: 30;
+  --z-modal: 40;
+  --z-palette: 50;
+  --z-toast: 60;
+  --z-pageview: 70;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 140ms;
+  --t-med: 240ms;
+  --t-slow: 380ms;
+}
