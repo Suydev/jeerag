@@ -3,5 +3,9 @@
   "llm_model": "",
   "llm_temperature": 0.7,
   "top_k": 5,
-  "llm_max_tokens": 512
+  "llm_max_tokens": 512,
+  "rerank_enabled": false,
+  "fusion_method": "rrf",
+  "contextual_retrieval": false,
+  "crag_enabled": true
 }
