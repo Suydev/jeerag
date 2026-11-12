@@ -148,8 +148,22 @@ def retrieve_for_question(question: str, cfg: dict | None = None):
         return hits, retrieve.diagrams_for(hits), "basic_bm25", 1
 
 
-def build_messages(question: str, history, cfg: dict, ctx_text: str, diags) -> list[dict]:
-    """System prompt (``llm_system_prompt`` override) + trimmed history + RAG turn."""
+def _related_pyq(question: str) -> list:
+    """PYQ/official-key enrichment for chat + answer (never fatal)."""
+    try:
+        return retrieve.related_pyq(question)
+    except Exception:
+        return []
+
+
+def build_messages(question: str, history, cfg: dict, ctx_text: str, diags,
+                   pyq=None) -> list[dict]:
+    """System prompt (``llm_system_prompt`` override) + trimmed history + RAG turn.
+
+    ``pyq`` (optional) is the related past-year question / official answer-key
+    chunk list from :func:`retrieve.related_pyq`; it is appended as its own
+    section so the model can cite official answers when they exist.
+    """
     messages = [{"role": "system",
                  "content": (str(cfg.get("llm_system_prompt") or "").strip()
                              or SYSTEM_PROMPT)}]
@@ -159,10 +173,15 @@ def build_messages(question: str, history, cfg: dict, ctx_text: str, diags) -> l
                              "content": str(h.get("content", ""))[:4000]})
     diag_note = "\n".join(f"diagram for p.{d['page']} of {d['file']}: {d['url']}"
                           for d in diags)
-    messages.append({"role": "user", "content":
-                     f"NOTES EXCERPTS:\n{ctx_text}\n\n"
-                     f"DIAGRAMS ON THESE PAGES:\n{diag_note}\n\n"
-                     f"QUESTION: {question}"})
+    user = (f"NOTES EXCERPTS:\n{ctx_text}\n\n"
+            f"DIAGRAMS ON THESE PAGES:\n{diag_note}\n\n")
+    if pyq:
+        lines = [f"[{p['file']} | p.{p['page']}] {p['text']}" for p in pyq]
+        user += ("PAST-YEAR QUESTIONS AND OFFICIAL ANSWER KEYS (kind=pyq — "
+                 "official JEE papers; 'Answer Qn: XYZ' lines are the official "
+                 "final answers — cite them as (filename, p.N)):\n"
+                 + "\n".join(lines) + "\n\n")
+    messages.append({"role": "user", "content": user + f"QUESTION: {question}"})
     return messages
 
 
@@ -217,6 +236,32 @@ class Handler(BaseHTTPRequestHandler):
             from .tracker import log_query
             log_query(q, hits, "search")
             self._json({"passages": hits, "diagrams": retrieve.diagrams_for(hits)})
+        elif u.path == "/api/pyq":
+            # past-year questions + official answer keys (kind='pyq' corpus)
+            qs = parse_qs(u.query)
+            q = qs.get("q", [""])[0]
+            try:
+                k = max(1, min(int(qs.get("k", ["10"])[0]), 24))
+            except ValueError:
+                k = 10
+            if not q.strip():
+                self._json({"passages": [], "diagrams": [], "years": [],
+                            "hint": "add ?q=<topic>, e.g. ?q=rotation&k=10"})
+                return
+            hits = retrieve.search(q, k=k, kind="pyq")
+            years: dict = {}
+            con = retrieve.connect()
+            try:
+                for r in con.execute(
+                        "SELECT chapter, COUNT(*) n FROM files "
+                        "WHERE kind='pyq' GROUP BY chapter ORDER BY chapter"):
+                    if r["chapter"]:
+                        years[r["chapter"]] = r["n"]
+            finally:
+                con.close()
+            self._json({"passages": hits,
+                        "diagrams": retrieve.diagrams_for(hits),
+                        "years": years})
         elif u.path == "/api/diagrams":
             q = parse_qs(u.query).get("q", [""])[0]
             try:
@@ -422,10 +467,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         cfg = config.load()
         hits, diags, method, loops = retrieve_for_question(question, cfg)
+        pyq = _related_pyq(question)
         from .tracker import log_query
         log_query(question, hits, "answer")
         out = {"question": question, "method": method, "loops": loops,
-               "passages": hits, "diagrams": diags, "answer": None}
+               "passages": hits, "diagrams": diags, "pyq": pyq, "answer": None}
         if not (cfg.get("llm_base_url") or "").strip():
             out["note"] = ("no LLM endpoint configured — passages only; set "
                            "llm_base_url via POST /api/config or config.json")
@@ -436,7 +482,7 @@ class Handler(BaseHTTPRequestHandler):
             ctx, _ = advanced_retrieve.build_advanced_context(
                 question, k=len(hits), cfg=cfg)
             messages = build_messages(question, body.get("history") or [],
-                                      cfg, ctx, diags)
+                                      cfg, ctx, diags, pyq=pyq)
             temp = float(cfg.get("llm_temperature", 0.2))
             out["answer"] = "".join(
                 llm_manager(cfg).chat(messages, temp, _max_tokens(cfg))).strip()
@@ -450,6 +496,7 @@ class Handler(BaseHTTPRequestHandler):
         cfg = config.load()
         # --- Advanced retrieval with agentic follow-loop (cached) ---
         hits, diags, method, loops = retrieve_for_question(question, cfg)
+        pyq = _related_pyq(question)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -463,7 +510,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise SystemExit
 
         send("context", {"passages": hits, "diagrams": diags,
-                         "method": method, "loops": loops})
+                         "pyq": pyq, "method": method, "loops": loops})
         from .tracker import log_query
         log_query(question, hits, "chat")
         if not (cfg.get("llm_base_url") or "").strip():
@@ -475,7 +522,8 @@ class Handler(BaseHTTPRequestHandler):
             from jeerag.llm.manager import llm_manager
             ctx, _ = advanced_retrieve.build_advanced_context(
                 question, k=len(hits), cfg=cfg)
-            messages = build_messages(question, history, cfg, ctx, diags)
+            messages = build_messages(question, history, cfg, ctx, diags,
+                                      pyq=pyq)
 
             # Stream answer via LLM provider (openai, anthropic, opencode2api, ...)
             temp = float(cfg.get("llm_temperature", 0.2))

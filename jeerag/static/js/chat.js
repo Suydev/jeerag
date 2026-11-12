@@ -98,10 +98,17 @@ function thinkingInto(bubble) {
   );
 }
 
-/** Sources row: diagram chips + passage summary chip. */
+/** Sources row: PYQ chip + diagram chips + passage summary chip. */
 function sourcesRow(ctx) {
   const row = el('div', { class: 'sources' });
   const n = (ctx.passages || []).length;
+  if ((ctx.pyq || []).length) {
+    row.append(el('button', { class: 'source-chip pyq', type: 'button',
+      onclick: () => showCitations(Object.assign(trimCtx(ctx), {
+        passages: ctx.pyq, method: 'pyq', diagrams: [],
+      }), { bringToFront: true }) },
+      iconEl('sparkles'), `${ctx.pyq.length} PYQ`));
+  }
   row.append(el('button', { class: 'source-chip', type: 'button',
     onclick: () => showCitations(trimCtx(ctx), { bringToFront: true }) },
     iconEl('doc'), `${n} passage${n === 1 ? '' : 's'}`));
@@ -115,12 +122,22 @@ function sourcesRow(ctx) {
 /** Collapsible retrieval details (rendered once, after the stream). */
 function ctxDetails(ctx) {
   const ps = ctx.passages || [];
-  if (!ps.length) return null;
+  const pyq = ctx.pyq || [];
+  if (!ps.length && !pyq.length) return null;
   const det = el('details', { class: 'ctx' },
     el('summary', {}, iconEl('chevR'),
-      el('span', { text: `${ps.length} passages · ${ctx.method || 'bm25'}` })),
+      el('span', { text: `${ps.length} passages · ${pyq.length ? pyq.length + ' PYQ · ' : ''}${ctx.method || 'bm25'}` })),
   );
   const inner = el('div', {});
+  if (pyq.length) {
+    inner.append(el('div', { class: 'p-meta pyq-head', text: 'PAST-YEAR QUESTIONS & OFFICIAL KEYS' }));
+    for (const p of pyq.slice(0, 6)) {
+      inner.append(el('div', { class: 'p-item pyq-item' },
+        el('div', { class: 'p-meta', text: `${p.file} · p.${p.page}` }),
+        el('div', { class: 'p-text', text: (p.text || '').slice(0, 400) + ((p.text || '').length > 400 ? '…' : '') }),
+      ));
+    }
+  }
   for (const p of ps.slice(0, 10)) {
     inner.append(el('div', { class: 'p-item' },
       el('div', { class: 'p-meta', text: `${p.file} · p.${p.page} · ${p.topic || ''}` }),
@@ -301,6 +318,7 @@ function trimCtx(ctx) {
     passages: (ctx.passages || []).slice(0, 8).map((p) => ({
       file: p.file, page: p.page, topic: p.topic, text: (p.text || '').slice(0, 280),
     })),
+    pyq: (ctx.pyq || []).slice(0, 6),
     diagrams: (ctx.diagrams || []).slice(0, 6).map((d) => ({
       url: d.url, path: d.path, file: d.file, page: d.page, caption: (d.caption || '').slice(0, 120),
     })),

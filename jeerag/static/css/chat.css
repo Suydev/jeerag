@@ -152,6 +152,15 @@
 }
 .source-chip:hover { border-color: var(--acc-line); background: var(--acc-softer); }
 .source-chip svg { width: 12px; height: 12px; }
+.source-chip.pyq {
+  background: var(--acc); border-color: var(--acc); color: var(--acc-fg);
+}
+.source-chip.pyq:hover { filter: brightness(1.12); background: var(--acc); }
+.ctx .p-meta.pyq-head {
+  color: var(--acc); font: 700 var(--fs--2)/1.5 var(--mono);
+  letter-spacing: .05em; text-transform: uppercase; margin: 6px 0 2px;
+}
+.ctx .p-item.pyq-item .p-meta { color: var(--acc); }
 
 .ctx { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 8px; font-size: var(--fs--1); }
 .ctx details { margin: 0; }

@@ -41,6 +41,19 @@
 .recap { margin: 0 0 10px; padding-left: 18px; color: var(--dim); }
 .recap li { margin: 3px 0; font-size: var(--fs--1); line-height: 1.55; }
 
+/* PYQ results */
+.badge-pyq {
+  font: 600 9px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--acc); background: var(--acc-softer);
+  border: 1px solid var(--acc-line); border-radius: 99px;
+  padding: 3px 6px; flex: none;
+}
+.year-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.year-chip {
+  font: 500 10.5px/1 var(--mono); color: var(--dim);
+  border: 1px solid var(--line); border-radius: 99px; padding: 4px 8px;
+}
+
 .method-pill { display: inline-flex; gap: 6px; align-items: center; margin-left: auto; }
 .method-pill .pill { font-size: 10.5px; }
 

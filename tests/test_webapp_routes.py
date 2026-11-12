@@ -68,14 +68,16 @@ def main():
             # --- health ---
             code, h = req("GET", "/api/health")
             assert code == 200 and h["ok"] and h["service"] == "jeerag-web", h
-            assert h["index"]["files"] == 1 and h["index_ok"], h
+            assert h["index"]["files"] == 3 and h["index_ok"], h
             assert h["llm"]["configured"] is False, h
             assert "uptime_s" in h, h
             print("health: PASS")
 
             # --- stats / topics still fine ---
             code, s = req("GET", "/api/stats")
-            assert code == 200 and s["files"] == 1, s
+            assert code == 200 and s["files"] == 3, s
+            kinds = {k["kind"]: k["c"] for k in s["by_kind"]}
+            assert kinds.get("pyq") == 2, s
             print("stats: PASS")
 
             # --- page text (pages table stores 0-based; API is 1-based) ---
@@ -92,6 +94,17 @@ def main():
             assert code == 200 and f["topic"] == "moment of inertia", f
             assert isinstance(f["sections"], list), f
             print("formulas: PASS (sections:", len(f["sections"]), ")")
+
+            # --- pyq: past-year questions + official keys (kind='pyq') ---
+            code, pq = req("GET", "/api/pyq?q=rolling%20cylinder&k=5")
+            assert code == 200 and pq["passages"], pq
+            assert pq["passages"][0]["file"] == "JEE Advanced 2024 Paper 1.pdf", pq
+            assert pq["years"].get("2024") == 2, pq
+            code, pq2 = req("GET", "/api/pyq?q=")
+            assert code == 200 and pq2["passages"] == [] and "hint" in pq2, pq2
+            code, pq3 = req("GET", "/api/pyq?q=moment%20of%20inertia")
+            assert code == 200 and pq3["passages"] == [], pq3  # note-only topic
+            print("pyq: PASS")
 
             # --- config: GET + POST with new keys + bogus key rejected ---
             code, c = req("GET", "/api/config")
@@ -129,6 +142,9 @@ def main():
             events = [ln.split(": ", 1)[1] for ln in body.splitlines()
                       if ln.startswith("event: ")]
             assert events == ["context", "no_llm", "done"], events
+            ctx = json.loads(body.split("event: context\ndata: ", 1)[1]
+                             .split("\n\n", 1)[0])
+            assert "pyq" in ctx, ctx  # enrichment slot present, [] when quiet
             print("chat SSE (no_llm): PASS", events)
 
             # --- cards: add → grade → delete (POST + DELETE) ---

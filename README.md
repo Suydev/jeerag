@@ -41,16 +41,42 @@ from any OpenAI-compatible endpoint you configure.
 
 ### HTTP API
 
-`GET /api/stats` · `/api/topics?kind=` · `/api/search?q=&kind=` ·
+`GET /api/stats` · `/api/topics?kind=` · `/api/search?q=&kind=` · `/api/pyq?q=&k=` ·
 `/api/diagrams?q=` · `/api/formulas?q=&k=` · `/api/page?file=&page=` ·
 `/api/cards` · `/api/tracker?days=` · `/api/recent?limit=` ·
 `/api/config` · `/api/providers` (LLM endpoint health) · `/api/health`
 (liveness + index + LLM state) · `/pdfpage/<file>/<n>.png` · `/diagrams/<path>`
 
-`POST /api/chat` (SSE stream) · `/api/answer` (one-shot JSON) ·
-`/api/config` (settings; also accepts `llm_temperature`, `llm_top_p`,
-`llm_max_tokens`, `llm_system_prompt`, `llm_provider`, `llm_providers`) ·
-`/api/cards` (add/grade/delete) · `DELETE /api/cards?id=`
+`POST /api/chat` (SSE stream; the `context` event carries
+`{passages, diagrams, pyq, method, loops}` — `pyq` is the related
+past-year-question / official-answer-key enrichment) · `/api/answer`
+(one-shot JSON, same pipeline) · `/api/config` (settings; also accepts
+`llm_temperature`, `llm_top_p`, `llm_max_tokens`, `llm_system_prompt`,
+`llm_provider`, `llm_providers`) · `/api/cards` (add/grade/delete) ·
+`DELETE /api/cards?id=`
+
+### Past-year questions (PYQ) & official answer keys
+
+`papers/` holds the PYQ corpus; official question papers and answer keys are
+indexed with `kind='pyq'` so they appear in the PYQ search tab, `/api/pyq`,
+and chat answers (the model gets a dedicated `PAST-YEAR QUESTIONS AND
+OFFICIAL ANSWER KEYS` context section).
+
+`jeerag/pyq_sources.py` is the fetcher for **official** sources only
+(jeeadv.ac.in, jeemain.nta.nic.in) — coaching-institute "solutions" are
+copyrighted and deliberately not included:
+
+```bash
+python -m jeerag.pyq_sources --list --check     # registry + live/Wayback probe
+python -m jeerag.pyq_sources --fetch-verified   # everything verified right now
+python -m jeerag.pyq_sources --fetch adv-2026-final-key-1
+python -m jeerag.pyq_sources --index papers/    # index fetched PDFs (kind=pyq)
+```
+
+Dead URLs fall back to the Internet Archive automatically, so keys for past
+years (e.g. `--fetch adv-2022-final-keys`) are still recoverable. Official
+JEE Advanced key PDFs embed `Answer Q8: ABC` lines which are parsed into
+`<pdf>.answers.json` sidecars.
 
 ## Web UI layout
 

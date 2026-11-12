@@ -30,6 +30,7 @@ export const api = {
   deleteCard: (id) => jpost('/api/cards', { action: 'delete', id }),
   tracker: (days) => jget(`/api/tracker?days=${days}`),
   search: (q) => jget(`/api/search?q=${enc(q)}`),
+  pyq: (q, k = 12) => jget(`/api/pyq?q=${enc(q)}&k=${k}`),
   diagrams: (q) => jget(`/api/diagrams?q=${enc(q)}`),
   formulas: (q, k = 6) => jget(`/api/formulas?q=${enc(q)}&k=${k}`),
   recent: (limit = 10) => jget(`/api/recent?limit=${limit}`),
@@ -39,7 +40,7 @@ export const api = {
 
 /**
  * POST /api/chat and dispatch Server-Sent Events.
- * Events: context {passages,diagrams,method,loops} · delta {t} ·
+ * Events: context {passages,diagrams,pyq,method,loops} · delta {t} ·
  *         done {} · no_llm {message} · error {message}
  * Returns when the stream ends; throws on HTTP/abort errors.
  */

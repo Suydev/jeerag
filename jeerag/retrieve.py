@@ -63,6 +63,24 @@ def search(question: str, k: int | None = None, kind: str | None = None):
     return hits
 
 
+def related_pyq(question: str, k: int = 4, limit: int = 3):
+    """Past-year-question / official-key chunks that clearly match a question.
+
+    Searches ``kind='pyq'`` only — official JEE papers and answer keys fetched
+    via ``python -m jeerag.pyq_sources`` and indexed with ``--kind pyq``.  fts5
+    bm25 scores are lower-is-better (negative); rows at the constant fallback
+    score -9.0 are topic-name guesses and are used only when nothing stronger
+    matched.  Returns ``[]`` when nothing plausibly matches so note-only
+    questions don't get PYQ noise injected.
+    """
+    hits = [h for h in search(question, k=k, kind="pyq") if h["score"] < 0]
+    strong = [h for h in hits if h["score"] != -9.0] or hits
+    strong.sort(key=lambda h: h["score"])
+    return [{"file": h["file"], "page": h["page"], "topic": h["topic"],
+             "score": h["score"], "text": h["text"][:280]}
+            for h in strong[:limit]]
+
+
 def build_context(hits, max_chars=9000):
     parts = []
     used = 0

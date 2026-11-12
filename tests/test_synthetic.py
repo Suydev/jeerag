@@ -48,6 +48,25 @@ def make_index(data_dir: Path):
                 ("moment of inertia I = sum m r^2 about the axis; parallel axis "
                  "theorem shifts I by m d^2", "Rigid body rotation", "physics",
                  "rotation.pdf", 2))
+    # PYQ corpus: official question paper + official final answer key (kind='pyq')
+    for f, chapter, topic, path in (
+        ("JEE Advanced 2024 Paper 1.pdf", "2024", "JEE Advanced Question",
+         "papers/jee-adv/2024/JEE Advanced 2024 Paper 1.pdf"),
+        ("JEE Advanced 2024 Final Answer Key Paper 1.pdf", "2024",
+         "JEE Advanced Answer Key",
+         "papers/jee-adv/keys/JEE Advanced 2024 Final Answer Key Paper 1.pdf"),
+    ):
+        con.execute("INSERT INTO files(file,path,chapter,topic,subject,kind,pages,"
+                    "ocr_pages,text_pages) VALUES(?,?,?,?,?,?,?,?,?)",
+                    (f, path, chapter, topic, "mixed", "pyq", 2, 2, 0))
+    con.execute("INSERT INTO chunks(text,topic,subject,file,page) VALUES(?,?,?,?,?)",
+                ("A solid cylinder rolling down an inclined plane; JEE Advanced "
+                 "2024 Paper 1 question on rotational dynamics", "JEE Advanced Question",
+                 "mixed", "JEE Advanced 2024 Paper 1.pdf", 2))
+    con.execute("INSERT INTO chunks(text,topic,subject,file,page) VALUES(?,?,?,?,?)",
+                ("Answer Q8: ABC Answer Q9: 6.25 official final answer key "
+                 "JEE Advanced 2024", "JEE Advanced Answer Key", "mixed",
+                 "JEE Advanced 2024 Final Answer Key Paper 1.pdf", 2))
     con.commit()
     con.close()
 
@@ -98,6 +117,13 @@ def main():
         assert topics and topics[0]["file"] == "rotation.pdf", topics
         stats = retrieve.stats()
         assert isinstance(stats, dict) and stats, stats
+
+        # PYQ enrichment: a question touching the PYQ corpus gets related
+        # past-year chunks; a notes-only question gets silence.
+        pyq = retrieve.related_pyq("rolling cylinder on an inclined plane")
+        assert pyq and pyq[0]["file"] == "JEE Advanced 2024 Paper 1.pdf", pyq
+        assert pyq[0]["score"] < 0, pyq
+        assert retrieve.related_pyq("moment of inertia") == [], "pyq noise"
         print("synthetic retrieval: PASS")
 
         env = dict(os.environ, JEERAG_DATA_DIR=str(data_dir))

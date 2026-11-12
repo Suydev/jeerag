@@ -134,11 +134,12 @@ function formulaSection(s) {
     body);
 }
 
-function passageRow(p) {
+function passageRow(p, badge = '') {
   return el('details', { class: 'passage' },
     el('summary', {},
       iconEl('chevR'),
       el('span', { class: 'pl', text: `${p.file} · p.${p.page}` }),
+      badge ? el('span', { class: 'badge-pyq', text: badge }) : null,
       el('span', { class: 'pt', text: p.topic || '' }),
     ),
     el('div', { class: 'p-body' },
@@ -164,6 +165,8 @@ export function openSearch({ tab = 'notes', initial = '' } = {}) {
       onclick: () => setTab('figures') }),
     el('button', { role: 'tab', 'aria-selected': String(tab === 'formulas'), text: 'Formulas',
       onclick: () => setTab('formulas') }),
+    el('button', { role: 'tab', 'aria-selected': String(tab === 'pyq'), text: 'PYQ',
+      onclick: () => setTab('pyq') }),
   );
   const results = el('div', {});
 
@@ -197,6 +200,27 @@ export function openSearch({ tab = 'notes', initial = '' } = {}) {
             text: 'No formula-bearing pages matched this topic.' }));
         }
         for (const s of sections) results.append(formulaSection(s));
+      } else if (curTab === 'pyq') {
+        const { passages = [], diagrams = [], years = {}, error } = await api.pyq(q);
+        results.replaceChildren();
+        if (error) {
+          results.append(el('p', { class: 'small', text: `PYQ search failed: ${error}` }));
+        } else if (!passages.length) {
+          results.append(el('p', { class: 'small',
+            text: 'No past-year questions matched. Index official papers/keys first: '
+              + '`python -m jeerag.pyq_sources --fetch-verified` then `--index papers/`.' }));
+        }
+        if (years && Object.keys(years).length) {
+          const yl = Object.keys(years).sort().reverse().slice(0, 12)
+            .map((y) => el('span', { class: 'year-chip', text: `${y} · ${years[y]}` }));
+          results.append(el('div', { class: 'year-row' }, ...yl));
+        }
+        for (const p of passages.slice(0, 12)) results.append(passageRow(p, 'PYQ'));
+        if (diagrams.length) {
+          const gal = el('div', { class: 'gal' });
+          for (const g of diagrams.slice(0, 6)) gal.append(figureCard(g));
+          results.append(gal);
+        }
       } else {
         const { diagrams } = await api.diagrams(q);
         results.replaceChildren();

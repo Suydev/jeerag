@@ -71,6 +71,7 @@ function buildPaletteActions() {
     { id: 'search', label: 'Search notes', group: 'Go to', icon: 'search', keywords: 'find bm25 passages', run: () => openSearch() },
     { id: 'figures', label: 'Find figures', group: 'Go to', icon: 'image', keywords: 'diagram caption gallery', run: () => openSearch({ tab: 'figures' }) },
     { id: 'formulas', label: 'Formula sheet', group: 'Go to', icon: 'sparkles', keywords: 'harvest relations revision topic equations', run: () => openSearch({ tab: 'formulas' }) },
+    { id: 'pyq', label: 'Past-year questions', group: 'Go to', icon: 'sparkles', keywords: 'pyq previous year question paper answer key official jee', run: () => openSearch({ tab: 'pyq' }) },
     { id: 'deck', label: 'Open Doubt Deck', group: 'Go to', icon: 'deck', keywords: 'review cards spaced repetition sm2', hint: 'due', run: openDeck },
     { id: 'stats', label: 'Study stats', group: 'Go to', icon: 'chart', keywords: 'tracker topics weak', run: openStats },
     { id: 'settings', label: 'Open settings', group: 'Go to', icon: 'gear', keywords: 'llm endpoint model key config', run: openSettings },
