@@ -15,35 +15,51 @@ import { initPalette, openPalette, closePalette, wirePalette, paletteOpen } from
 
 const $ = (id) => document.getElementById(id);
 
-/* ---------- boot order: icons → theme → chat → panels ---------- */
+/* ---------- boot guard: one failed stage must never kill the rest ---------- */
+function stage(name, fn) {
+  try {
+    fn();
+  } catch (e) {
+    console.error(`[boot] ${name} failed:`, e);
+    try { toast(`Some features failed to load (${name}).`, { type: 'err' }); } catch { /* noop */ }
+  }
+}
+
+/* ---------- boot order: icons → theme → panels → header → chat ---------- */
 hydrateIcons();
-initTheme();
+
 const btnTheme = $('btnTheme');
 const syncThemeBtn = () => btnTheme.replaceChildren(iconEl(currentTheme() === 'dark' ? 'sun' : 'moon'));
+window.addEventListener('themechange', syncThemeBtn); // before initTheme so the first apply is heard
+stage('theme', initTheme);
 syncThemeBtn();
-window.addEventListener('themechange', syncThemeBtn);
 
-/* ---------- chat ---------- */
-initChat();
-wirePanels();
+stage('panels', wirePanels);
 
 /* ---------- header actions ---------- */
-$('btnPalette').addEventListener('click', openPalette);
-$('btnSearch').addEventListener('click', () => openSearch());
-$('btnStats').addEventListener('click', openStats);
-$('btnDeck').addEventListener('click', openDeck);
-$('btnSettings').addEventListener('click', openSettings);
-$('btnFigures').addEventListener('click', figuresFromDraft);
-btnTheme.addEventListener('click', toggleTheme);
-$('statpill').addEventListener('click', openStats);
+stage('header', () => {
+  $('btnPalette').addEventListener('click', openPalette);
+  $('btnSearch').addEventListener('click', () => openSearch());
+  $('btnStats').addEventListener('click', openStats);
+  $('btnDeck').addEventListener('click', openDeck);
+  $('btnSettings').addEventListener('click', openSettings);
+  $('btnFigures').addEventListener('click', figuresFromDraft);
+  btnTheme.addEventListener('click', toggleTheme);
+  $('statpill').addEventListener('click', openStats);
+});
+
+/* ---------- chat ---------- */
+stage('chat', initChat);
 
 /* ---------- welcome chips → ask directly ---------- */
 const chipActions = [];
-for (const chip of document.querySelectorAll('.chip[data-q]')) {
-  const q = chip.dataset.q;
-  chipActions.push({ id: `ask-${chipActions.length}`, label: q, group: 'Ask your notes', icon: 'sparkles', run: () => ask(q) });
-  chip.addEventListener('click', () => ask(q));
-}
+stage('chips', () => {
+  for (const chip of document.querySelectorAll('.chip[data-q]')) {
+    const q = chip.dataset.q;
+    chipActions.push({ id: `ask-${chipActions.length}`, label: q, group: 'Ask your notes', icon: 'sparkles', run: () => ask(q) });
+    chip.addEventListener('click', () => ask(q));
+  }
+});
 
 /* ---------- stats pill (animated count-up) ---------- */
 async function loadStats() {
@@ -79,26 +95,30 @@ function buildPaletteActions() {
       group: 'Theme', icon: currentTheme() === 'dark' ? 'sun' : 'moon', keywords: 'dark light mode', run: toggleTheme },
   ];
 }
-initPalette(buildPaletteActions());
-wirePalette();
-window.addEventListener('themechange', () => initPalette(buildPaletteActions()));
+stage('palette', () => {
+  initPalette(buildPaletteActions());
+  wirePalette();
+  window.addEventListener('themechange', () => initPalette(buildPaletteActions()));
+});
 
 /* ---------- global keyboard shortcuts ---------- */
-document.addEventListener('keydown', (e) => {
-  const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.key.toLowerCase() === 'k') {
-    e.preventDefault();
-    paletteOpen() ? closePalette() : openPalette();
-  } else if (mod && e.key === '/') {
-    e.preventDefault();
-    $('q').focus();
-  } else if (e.key === 'Escape' && !paletteOpen()) {
-    const top = overlayStack.top();
-    if (top) {
+stage('shortcuts', () => {
+  document.addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      top();
+      paletteOpen() ? closePalette() : openPalette();
+    } else if (mod && e.key === '/') {
+      e.preventDefault();
+      $('q').focus();
+    } else if (e.key === 'Escape' && !paletteOpen()) {
+      const top = overlayStack.top();
+      if (top) {
+        e.preventDefault();
+        top();
+      }
     }
-  }
+  });
 });
 
 /* ---------- boot ---------- */

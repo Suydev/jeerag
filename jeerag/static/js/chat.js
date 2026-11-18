@@ -7,7 +7,7 @@ import { el, iconEl, copyText } from './ui.js';
 import { renderRich, mdToHtml, sanitize, enhance, renderMath } from './markdown.js';
 import { toast } from './toasts.js';
 import { store } from './store.js';
-import { showPage, saveToDeck, showCitations } from './panels.js';
+import { showPage, saveToDeck, showCitations, markOpenedCitations } from './panels.js';
 
 const $ = (id) => document.getElementById(id);
 const log = $('log');
@@ -114,8 +114,10 @@ function sourcesRow(ctx) {
     iconEl('doc'), `${n} passage${n === 1 ? '' : 's'}`));
   for (const d of (ctx.diagrams || []).slice(0, 3)) {
     row.append(el('button', { class: 'source-chip', type: 'button',
+      'data-file': d.file, 'data-page': String(d.page ?? ''),
       onclick: () => showPage(d.file, d.page) }, iconEl('image'), `p.${d.page}`));
   }
+  markOpenedCitations(row);
   return row;
 }
 
@@ -232,7 +234,12 @@ async function runStream(question) {
     const { answer, ctx, question: q, note } = active;
     bubble.replaceChildren();
     if (answer) {
-      renderRich(bubble, answer);
+      try {
+        renderRich(bubble, answer);
+      } catch (e) {
+        console.warn('[chat] answer render failed — showing plain text:', e);
+        bubble.append(el('p', { text: answer })); // raw fallback; answer still persisted
+      }
     } else if (note) {
       bubble.append(note); // keep the no_llm / error explanation
     } else {
@@ -240,19 +247,26 @@ async function runStream(question) {
         text: stopped ? 'Stopped before any tokens arrived.' : 'No answer text returned.' }));
     }
     if (ctx) {
-      msg.append(sourcesRow(ctx));
-      bubble.append(ctxDetails(ctx) ?? '');
+      try {
+        msg.append(sourcesRow(ctx));
+        bubble.append(ctxDetails(ctx) ?? '');
+      } catch (e) {
+        console.warn('[chat] sources render failed:', e);
+      }
     }
     if (stopped && answer) bubble.append(el('p', { class: 'small', text: '⏹ Stopped by user — partial answer kept.' }));
 
     if (answer) {
-      const acts = el('div', { class: 'acts' },
-        copyAction(answer),
-        ctx ? deckAction(q, answer, ctx) : null,
-        ctx ? openPageAction(ctx) : null,
-        regenAction(),
-      );
-      msg.append(acts);
+      try {
+        msg.append(el('div', { class: 'acts' },
+          copyAction(answer),
+          ctx ? deckAction(q, answer, ctx) : null,
+          ctx ? openPageAction(ctx) : null,
+          regenAction(),
+        ));
+      } catch (e) {
+        console.warn('[chat] actions render failed:', e);
+      }
       history.push({ role: 'user', content: q });
       history.push({ role: 'assistant', content: answer });
     }
@@ -402,17 +416,29 @@ function renderRestored(m) {
 }
 
 export function restore(snapshot = store.get('chat', [])) {
-  msgs = snapshot;
-  history = [];
-  for (const m of msgs) if (m.content) history.push({ role: m.role, content: m.content });
+  const src = Array.isArray(snapshot) ? snapshot : [];
   thread?.replaceChildren();
   thread = null;
   showWelcome();
-  if (msgs.length) {
-    ensureThread();
-    for (const m of msgs) renderRestored(m);
-    log.scrollTo({ top: log.scrollHeight, behavior: 'instant' });
+  msgs = [];
+  history = [];
+  if (!src.length) return;
+  ensureThread();
+  let dropped = 0;
+  for (const m of src) {
+    try {
+      if (!m || (m.role !== 'user' && m.role !== 'assistant')
+        || typeof m.content !== 'string') { dropped += 1; continue; }
+      renderRestored(m); // one poisoned entry must not kill the rest or the boot
+      msgs.push(m);
+      if (m.content) history.push({ role: m.role, content: m.content });
+    } catch (e) {
+      dropped += 1;
+      console.warn('[chat] dropped unrenderable saved message:', e);
+    }
   }
+  if (dropped) persist(); // write back the cleaned list
+  log.scrollTo({ top: log.scrollHeight, behavior: 'instant' });
 }
 
 /* ==========================================================================

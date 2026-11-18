@@ -50,3 +50,27 @@
   font-display: swap;
   src: url("/static/vendor/fonts/jbmono-600.woff2") format("woff2");
 }
+
+/* STIX Two Text — scientific-publishing serif; kin of KaTeX's Computer
+   Modern, so rendered math and prose share one typographic world. */
+@font-face {
+  font-family: "STIX Two Text";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/vendor/fonts/stix-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "STIX Two Text";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/static/vendor/fonts/stix-600.woff2") format("woff2");
+}
+@font-face {
+  font-family: "STIX Two Text";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/vendor/fonts/stix-italic.woff2") format("woff2");
+}

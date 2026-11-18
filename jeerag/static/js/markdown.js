@@ -7,11 +7,19 @@ import { esc, iconEl } from './ui.js';
 
 const markedAvailable = () => typeof window.marked?.parse === 'function';
 
+// Configure once at import time. Vendored marked v12 supports marked.use();
+// older/newer builds keep setOptions. Never throw — plain-text fallback remains.
+if (markedAvailable()) {
+  try {
+    if (typeof window.marked.use === 'function') window.marked.use({ breaks: true });
+    else window.marked.setOptions({ breaks: true });
+  } catch { /* defaults still render */ }
+}
+
 export function mdToHtml(text) {
   const t = String(text || '');
   if (markedAvailable()) {
     try {
-      window.marked.setOptions({ breaks: true });
       return window.marked.parse(t);
     } catch { /* fall through to plain text */ }
   }
@@ -124,6 +132,8 @@ function enhanceCitations(root) {
       chip.className = 'cite-chip';
       chip.textContent = `(${file}, p.${page})`;
       chip.title = 'Open the scanned page';
+      chip.dataset.file = file;
+      chip.dataset.page = String(page);
       chip.addEventListener('click', () =>
         window.dispatchEvent(new CustomEvent('open-page', { detail: { file, page } })));
       frag.append(chip);

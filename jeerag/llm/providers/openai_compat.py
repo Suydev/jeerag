@@ -87,6 +87,13 @@ def _should_rotate(status: int) -> bool:
     return status in (401, 402, 403, 429)
 
 
+def _retry_delay(attempt: int, base: float = 1.0, cap: float = 30.0) -> float:
+    """Exponential backoff with jitter: base * 2^attempt + jitter."""
+    import random
+    delay = min(base * (2 ** attempt), cap)
+    return delay + random.uniform(0, 0.5 * delay)
+
+
 class OpenAICompatibleProvider(LLMProvider):
     """OpenAI-compatible provider: OpenAI, opencode2api, Groq, Together,
     local llama.cpp servers, anything speaking /v1/chat/completions + SSE."""
@@ -199,88 +206,112 @@ class OpenAICompatibleProvider(LLMProvider):
             headers["X-Title"] = "jeerag"
 
         last_err: LLMProviderError | None = None
-        try:
-            resp, conn = _post_streaming(
-                url, headers, payload,
-                self.connect_timeout, self.read_timeout,
-                self.first_event_timeout,
-            )
-        except Exception as e:
-            raise LLMProviderError(f"{type(e).__name__}: {e}") from e
-
-        first_event_time = None
-        yielded_any = False
-        try:
-            with resp:
-                for raw in resp:
-                    line = raw.decode("utf-8", "replace").strip()
-                    if not line:
-                        continue
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if first_event_time is None:
-                        first_event_time = time.time()
-                    if data == "[DONE]":
-                        return
-                    if data.startswith("{") and data.endswith("}"):
-                        try:
-                            obj = json.loads(data)
-                        except json.JSONDecodeError:
-                            continue
-                        if isinstance(obj, dict) and obj.get("error"):
-                            err = obj["error"]
-                            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
-                            raise LLMProviderError(f"SSE error: {msg}")
-                        for ch in obj.get("choices") or []:
-                            delta = (ch.get("delta") or {}).get("content")
-                            if delta:
-                                yielded_any = True
-                                yield delta
-                    elif data:
-                        yielded_any = True
-                        yield data
-                    if first_event_time is not None:
-                        if time.time() - first_event_time > self.first_event_timeout:
-                            raise LLMProviderError(
-                                f"no SSE data event within {self.first_event_timeout}s "
-                                f"(upstream accepted but streamed nothing)"
-                            )
-                return
-        except LLMProviderError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise LLMProviderError(
-                f"stream read error: {type(e).__name__}: {e}"
-            ) from e
-
-        if yielded_any:
-            return
-
-        # Non-streaming fallback with the same key.
-        try:
-            status, data = _post_complete(
-                url, headers, payload, self.connect_timeout, self.read_timeout
-            )
-        except Exception as e:
-            raise LLMProviderError(f"{type(e).__name__}: {e}") from e
-
-        if status == 200:
+        max_retries = int(self.cfg.get("llm_retries", 3))
+        for attempt in range(max_retries + 1):
             try:
-                obj = json.loads(data)
-            except json.JSONDecodeError:
-                yield data.strip()
-                return
-            for ch in obj.get("choices") or []:
-                delta = (
-                    (ch.get("delta") or {}).get("content")
-                    or (ch.get("message") or {}).get("content")
-                    or ""
+                resp, conn = _post_streaming(
+                    url, headers, payload,
+                    self.connect_timeout, self.read_timeout,
+                    self.first_event_timeout,
                 )
-                if delta:
-                    yield delta
-            return
-        elif status in (401, 402, 403, 429):
-            raise LLMProviderError(f"HTTP {status}: {data[:200]}")
-        else:
-            raise LLMProviderError(f"HTTP {status}: {data[:200]}")
+            except Exception as e:
+                last_err = LLMProviderError(f"{type(e).__name__}: {e}")
+                if attempt < max_retries:
+                    delay = _retry_delay(attempt)
+                    time.sleep(delay)
+                    continue
+                raise last_err
+
+            first_event_time = None
+            yielded_any = False
+            try:
+                with resp:
+                    for raw in resp:
+                        line = raw.decode("utf-8", "replace").strip()
+                        if not line:
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if first_event_time is None:
+                            first_event_time = time.time()
+                        if data == "[DONE]":
+                            return
+                        if data.startswith("{") and data.endswith("}"):
+                            try:
+                                obj = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
+                            if isinstance(obj, dict) and obj.get("error"):
+                                err = obj["error"]
+                                msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                                raise LLMProviderError(f"SSE error: {msg}")
+                            for ch in obj.get("choices") or []:
+                                delta = (ch.get("delta") or {}).get("content")
+                                if delta:
+                                    yielded_any = True
+                                    yield delta
+                        elif data:
+                            yielded_any = True
+                            yield data
+                        if first_event_time is not None:
+                            if time.time() - first_event_time > self.first_event_timeout:
+                                raise LLMProviderError(
+                                    f"no SSE data event within {self.first_event_timeout}s "
+                                    f"(upstream accepted but streamed nothing)"
+                                )
+                    return
+            except LLMProviderError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                last_err = LLMProviderError(
+                    f"stream read error: {type(e).__name__}: {e}"
+                )
+
+            if yielded_any:
+                return
+
+            # Non-streaming fallback with the same key.
+            try:
+                status, data = _post_complete(
+                    url, headers, payload, self.connect_timeout, self.read_timeout
+                )
+            except Exception as e:
+                last_err = LLMProviderError(f"{type(e).__name__}: {e}")
+                if attempt < max_retries:
+                    delay = _retry_delay(attempt)
+                    time.sleep(delay)
+                    continue
+                raise last_err
+
+            if status == 200:
+                try:
+                    obj = json.loads(data)
+                except json.JSONDecodeError:
+                    yield data.strip()
+                    return
+                for ch in obj.get("choices") or []:
+                    delta = (
+                        (ch.get("delta") or {}).get("content")
+                        or (ch.get("message") or {}).get("content")
+                        or ""
+                    )
+                    if delta:
+                        yield delta
+                return
+            elif status in (401, 402, 403, 429):
+                last_err = LLMProviderError(f"HTTP {status}: {data[:200]}")
+                if attempt < max_retries:
+                    delay = _retry_delay(attempt)
+                    time.sleep(delay)
+                    continue
+                raise last_err
+            else:
+                last_err = LLMProviderError(f"HTTP {status}: {data[:200]}")
+                if attempt < max_retries:
+                    delay = _retry_delay(attempt)
+                    time.sleep(delay)
+                    continue
+                raise last_err
+
+        raise last_err or LLMProviderError("no provider produced output")

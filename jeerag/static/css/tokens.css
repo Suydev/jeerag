@@ -1,21 +1,29 @@
 /* ==========================================================================
    tokens.css — design tokens: themes, accents, type, space, elevation
+   "The student's own working": ink ground, graph-paper grid, one
+   highlighter accent, citations in their own blue.
    ========================================================================== */
 
 :root {
-  /* dark theme (default) */
-  --bg: #0b0d12;
-  --panel: #12151c;
-  --panel-2: #171b24;
-  --raised: #1c212c;
+  /* dark theme (default) — ink */
+  --bg: #0e1116;
+  --panel: #161c24;
+  --panel-2: #1a212b;
+  --raised: #202836;
   --border: rgba(255, 255, 255, 0.07);
   --border-strong: rgba(255, 255, 255, 0.14);
-  --fg: #e8ebf2;
+  --fg: #e9edf3;
   --dim: #98a2b3;
   --faint: #5d6577;
   --danger: #f87171;
   --ok: #34d399;
   --warn: #fbbf24;
+
+  /* highlighter (the one attention accent) + citation blue */
+  --hl: #f5c84b;
+  --hl-ink: #221a03;
+  --cite: #8ab6f9;
+  --grid: rgba(138, 182, 249, 0.055);
 
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-2: 0 12px 32px -12px rgba(0, 0, 0, 0.55);
@@ -25,9 +33,9 @@
 }
 
 [data-theme="light"] {
-  --bg: #f4f6f8;
+  --bg: #f2f4f7;
   --panel: #ffffff;
-  --panel-2: #f8fafc;
+  --panel-2: #f6f8fa;
   --raised: #ffffff;
   --border: rgba(15, 23, 42, 0.09);
   --border-strong: rgba(15, 23, 42, 0.18);
@@ -38,6 +46,11 @@
   --ok: #059669;
   --warn: #d97706;
 
+  --hl: #ffd84d;
+  --hl-ink: #221a03;
+  --cite: #1d6fd6;
+  --grid: rgba(29, 111, 214, 0.05);
+
   --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-2: 0 12px 32px -12px rgba(15, 23, 42, 0.18);
   --shadow-3: 0 24px 64px -24px rgba(15, 23, 42, 0.28);
@@ -45,13 +58,15 @@
   color-scheme: light;
 }
 
-/* ---- accents (soft variants derive automatically via color-mix) ---- */
-:root, [data-accent="teal"]   { --acc: #2dd4bf; --acc-fg: #04211d; }
+/* ---- accents (soft variants derive automatically via color-mix) ----
+   "teal" is retained as the accent id for JS compatibility; its value is
+   now the highlighter yellow. */
+:root, [data-accent="teal"]   { --acc: #f5c84b; --acc-fg: #221a03; }
 [data-accent="indigo"]        { --acc: #818cf8; --acc-fg: #10123a; }
 [data-accent="rose"]          { --acc: #fb7185; --acc-fg: #340b10; }
 [data-accent="amber"]         { --acc: #fbbf24; --acc-fg: #2a1c02; }
 
-[data-theme="light"][data-accent="teal"]   { --acc: #0d9488; --acc-fg: #ffffff; }
+[data-theme="light"][data-accent="teal"]   { --acc: #8a6d1f; --acc-fg: #ffffff; }
 [data-theme="light"][data-accent="indigo"] { --acc: #4f46e5; --acc-fg: #ffffff; }
 [data-theme="light"][data-accent="rose"]   { --acc: #e11d48; --acc-fg: #ffffff; }
 [data-theme="light"][data-accent="amber"]  { --acc: #b45309; --acc-fg: #ffffff; }
@@ -60,12 +75,14 @@
   --acc-soft: color-mix(in srgb, var(--acc) 14%, transparent);
   --acc-softer: color-mix(in srgb, var(--acc) 7%, transparent);
   --acc-line: color-mix(in srgb, var(--acc) 35%, transparent);
-  --grad: linear-gradient(135deg, var(--acc), color-mix(in srgb, var(--acc) 55%, #6366f1));
+  /* near-flat block: tonal shift only, no foreign hue */
+  --grad: linear-gradient(135deg, var(--acc), color-mix(in srgb, var(--acc) 86%, var(--fg)));
 }
 
 /* ---- type ---- */
 :root {
   --font: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "STIX Two Text", "Georgia", "Times New Roman", serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
   --fs-0: 15px;      /* body */
   --fs--1: 13px;     /* small */

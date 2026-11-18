@@ -76,3 +76,4 @@ RAG over 73 scanned IIT-JEE physics/maths PDFs (Ambarish Sir notes): 2,279 pages
 5. Diagram captions + diagram_fts; formula sheets + revision PDFs.
 6. Evaluation metrics (faithfulness/relevancy/precision/recall) + golden set `golden_v1.jsonl`.
 7. Web UI state machine (idle→retrieving→thinking→streaming→done), AbortController stop, right-sidebar citations.
+8. PyPI packaging: pyproject.toml + `jeerag` CLI (cli.py), CI workflow, synthetic-index test (`tests/test_synthetic.py`); PWA manifest + icons; query tracker (`jeerag tracker`, `/api/tracker`, querylog.db).

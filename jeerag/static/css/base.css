@@ -42,7 +42,7 @@ kbd {
   color: var(--dim);
 }
 
-a { color: var(--acc); text-decoration: none; }
+a { color: var(--cite); text-decoration: none; }
 a:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 .small { font-size: var(--fs--1); color: var(--dim); }

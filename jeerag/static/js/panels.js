@@ -7,6 +7,7 @@ import { api } from './api.js';
 import { el, esc, iconEl, overlayStack } from './ui.js';
 import { renderRich, renderMath } from './markdown.js';
 import { toast } from './toasts.js';
+import { store } from './store.js';
 import { ACCENTS, currentAccent, currentTheme, setAccent, setTheme } from './theme.js';
 
 const $ = (id) => document.getElementById(id);
@@ -65,10 +66,11 @@ export function showCitations(ctx, { bringToFront = false } = {}) {
       ),
       el('div', { class: 'p-body' },
         el('div', { text: (p.text || '').slice(0, 600) + ((p.text || '').length > 600 ? '…' : '') }),
-        el('button', {
-          class: 'btn ghost small-p', type: 'button',
-          onclick: () => showPage(p.file, p.page),
-        }, iconEl('doc'), `Open p.${p.page}`),
+      el('button', {
+        class: 'btn ghost small-p', type: 'button',
+        'data-file': p.file, 'data-page': String(p.page),
+        onclick: () => showPage(p.file, p.page),
+      }, iconEl('doc'), `Open p.${p.page}`),
       ),
     );
     pSec.append(d);
@@ -125,6 +127,7 @@ function formulaSection(s) {
     body.append(gal);
   }
   body.append(el('button', { class: 'btn ghost small-p', type: 'button',
+    'data-file': s.file, 'data-page': String(s.page),
     onclick: () => showPage(s.file, s.page) }, iconEl('doc'), `Open p.${s.page}`));
   return el('details', { class: 'passage' },
     el('summary', {},
@@ -292,6 +295,7 @@ function pvLoad() {
 
 export function showPage(file, page = 1) {
   if (!file) return;
+  markOpened(file, page);
   pvFile = file;
   pvPage = page;
   if (!pvOpen) {
@@ -300,9 +304,42 @@ export function showPage(file, page = 1) {
     overlayStack.push(closePageview);
   }
   pvLoad();
+  markOpenedCitations(document);
 }
 
 window.addEventListener('open-page', (e) => showPage(e.detail.file, e.detail.page));
+
+/* ---------- OMR bubbles: remember which citations were opened ---------- */
+
+function openedMap() {
+  const v = store.get('opened', {});
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+}
+
+function markOpened(file, page) {
+  const p = Number(page);
+  if (!file || !p) return;
+  const m = openedMap();
+  const key = `${file}#p${p}`;
+  if (m[key]) return;
+  m[key] = Date.now();
+  const keys = Object.keys(m);
+  if (keys.length > 200) {
+    keys.sort((a, b) => m[a] - m[b]);
+    for (const k of keys.slice(0, keys.length - 200)) delete m[k];
+  }
+  store.set('opened', m);
+}
+
+/** Add class `bubbled` to any [data-file][data-page] element already opened. */
+export function markOpenedCitations(root = document) {
+  try {
+    const m = openedMap();
+    for (const node of root.querySelectorAll('[data-file][data-page]')) {
+      if (m[`${node.dataset.file}#p${Number(node.dataset.page)}`]) node.classList.add('bubbled');
+    }
+  } catch { /* cosmetic only — never break rendering */ }
+}
 
 /* ==========================================================================
    Doubt Deck — flashcard flow over the SM-2 queue
@@ -402,6 +439,7 @@ function renderFlash() {
     const src = el('div', { class: 'src-line' });
     if (card.file) {
       src.append(el('button', { class: 'source-chip', type: 'button',
+        'data-file': card.file, 'data-page': String(card.page ?? ''),
         onclick: () => showPage(card.file, card.page) },
         iconEl('doc'), `${card.file} · p.${card.page}`));
     }
@@ -428,7 +466,10 @@ function renderFlash() {
 async function grade(id, score) {
   try {
     const res = await api.grade(id, score);
-    toast(`Next review in ${res.interval} day${res.interval === 1 ? '' : 's'}`, { type: 'ok' });
+    const next = res.interval ?? res.next ?? res?.card?.interval ?? null;
+    toast(next == null
+      ? 'Card scheduled — review it tomorrow.'
+      : `Next review in ${next} day${next === 1 ? '' : 's'}`, { type: 'ok' });
     deck.idx += 1;
     deck.revealed = false;
     if (deck.idx >= deck.queue.length) {
@@ -512,12 +553,6 @@ export function openSettings() {
 }
 
 function wireSettings() {
-  $('modal-settings').addEventListener('click', (e) => {
-    if (e.target === $('modal-settings')) closeSettings();
-  });
-  for (const b of $('modal-settings').querySelectorAll('[data-close]')) {
-    b.addEventListener('click', closeSettings);
-  }
   $('segTheme').addEventListener('click', (e) => {
     const btn = e.target.closest('[data-theme-set]');
     if (btn) setTheme(btn.dataset.themeSet);
@@ -605,6 +640,18 @@ async function renderStats(days) {
 
 export function wirePanels() {
   wireSettings();
+  // every modal: backdrop-click close + all its [data-close] buttons (X, Cancel)
+  for (const [modal, close] of [
+    ['modal-settings', closeSettings],
+    ['modal-deck', closeDeck],
+    ['modal-stats', closeStats],
+  ]) {
+    const m = $(modal);
+    m.addEventListener('click', (e) => { if (e.target === m) close(); });
+    for (const b of m.querySelectorAll('[data-close]')) {
+      b.addEventListener('click', close);
+    }
+  }
   $('drawerClose').addEventListener('click', closeDrawer);
   $('scrim').addEventListener('click', closeDrawer);
   $('pvClose').addEventListener('click', closePageview);

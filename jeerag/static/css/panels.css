@@ -6,10 +6,10 @@
 .drawer-sec { margin-bottom: 22px; }
 .drawer-sec > h3 {
   margin: 0 0 10px; font: 700 var(--fs--1)/1 var(--font);
-  text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint);
+  letter-spacing: 0.01em; color: var(--faint);
   display: flex; align-items: center; gap: 7px;
 }
-.drawer-sec > h3 .count { color: var(--acc); }
+.drawer-sec > h3 .count { color: var(--cite); }
 
 .passage { border: 1px solid var(--border); border-radius: var(--r-m); margin-bottom: 9px; background: var(--panel-2); overflow: hidden; }
 .passage summary {
@@ -20,7 +20,7 @@
 .passage summary::-webkit-details-marker { display: none; }
 .passage summary svg { width: 13px; height: 13px; color: var(--faint); transition: transform var(--t-fast); flex: none; }
 .passage details[open] > summary svg, .passage[open] > summary svg { transform: rotate(90deg); }
-.passage summary .pl { color: var(--acc); }
+.passage summary .pl { color: var(--cite); }
 .passage summary .pt { margin-left: auto; font-size: var(--fs--2); color: var(--faint); font-weight: 500;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40%; }
 .passage .p-body { padding: 0 12px 12px; color: var(--dim); font-size: var(--fs--1); line-height: 1.6; white-space: pre-wrap; }

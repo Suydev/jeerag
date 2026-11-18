@@ -64,6 +64,78 @@ def _query_cache_put(key: str, result: dict) -> None:
             _query_cache.popitem(last=False)
 
 
+# --- Metrics / observability ------------------------------------------------
+# Counters and timers for observability. These are in-memory only and reset
+# on restart; for production they should be pushed to Prometheus/Promscale.
+_METRICS = {
+    "requests_total": 0,
+    "requests_errors": 0,
+    "llm_requests_total": 0,
+    "llm_requests_errors": 0,
+    "llm_latency_ms": [],
+    "retrieval_latency_ms": [],
+    "cache_hits": 0,
+    "cache_misses": 0,
+}
+_metrics_lock = threading.Lock()
+
+
+def _metrics_inc(key: str, value: float = 1.0) -> None:
+    with _metrics_lock:
+        if key in ("requests_total", "requests_errors", "llm_requests_total", "llm_requests_errors",
+                   "cache_hits", "cache_misses"):
+            _METRICS[key] += value
+        elif key in ("llm_latency_ms", "retrieval_latency_ms"):
+            _METRICS[key].append(value)
+            # keep only last 1000 samples
+            if len(_METRICS[key]) > 1000:
+                _METRICS[key] = _METRICS[key][-1000:]
+
+
+def metrics_snapshot() -> dict:
+    with _metrics_lock:
+        llm_lat = _METRICS["llm_latency_ms"]
+        ret_lat = _METRICS["retrieval_latency_ms"]
+        def pct(vals, p):
+            if not vals:
+                return 0
+            s = sorted(vals)
+            idx = int(p * (len(s) - 1))
+            return s[idx]
+        total_req = _METRICS["requests_total"]
+        err_req = _METRICS["requests_errors"]
+        total_llm = _METRICS["llm_requests_total"]
+        err_llm = _METRICS["llm_requests_errors"]
+        cache_hits = _METRICS["cache_hits"]
+        cache_misses = _METRICS["cache_misses"]
+        cache_total = cache_hits + cache_misses
+        return {
+            "requests_total": total_req,
+            "requests_errors": err_req,
+            "error_rate": round(err_req / total_req, 4) if total_req else 0.0,
+            "llm_requests_total": total_llm,
+            "llm_requests_errors": err_llm,
+            "llm_error_rate": round(err_llm / total_llm, 4) if total_llm else 0.0,
+            "llm_latency_ms": {
+                "p50": pct(llm_lat, 0.5),
+                "p95": pct(llm_lat, 0.95),
+                "p99": pct(llm_lat, 0.99),
+                "mean": round(sum(llm_lat) / len(llm_lat), 2) if llm_lat else 0,
+            },
+            "retrieval_latency_ms": {
+                "p50": pct(ret_lat, 0.5),
+                "p95": pct(ret_lat, 0.95),
+                "p99": pct(ret_lat, 0.99),
+                "mean": round(sum(ret_lat) / len(ret_lat), 2) if ret_lat else 0,
+            },
+            "cache": {
+                "hits": cache_hits,
+                "misses": cache_misses,
+                "hit_rate": round(cache_hits / cache_total, 4) if cache_total else 0.0,
+            },
+        }
+
+
 def pdf_path_for(name):
     """Resolve an indexed PDF by file name (absolute path, else notes_dir)."""
     con = retrieve.connect()
@@ -202,6 +274,7 @@ class Handler(BaseHTTPRequestHandler):
         body = json.dumps(obj, default=str).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -224,10 +297,15 @@ class Handler(BaseHTTPRequestHandler):
             kind = parse_qs(u.query).get("kind", [None])[0]
             self._json(retrieve.topics(kind=kind))
         elif u.path == "/api/config":
-            cfg = config.load()
-            key = cfg.get("llm_api_key") or ""
-            cfg["llm_api_key"] = (key[:4] + "…" + key[-4:]) if len(key) > 8 else key
-            cfg["llm_api_key_set"] = bool(key)
+            cfg = dict(config.load())
+            keys = cfg.pop("llm_keys", []) or []
+            had_key = bool(str(cfg.pop("llm_api_key", "") or "").strip())
+            if isinstance(keys, str):
+                keys = keys.replace("\n", ",").split(",")
+            n_keys = len([k for k in keys if str(k).strip()])
+            # secrets never leave the server — only their presence
+            cfg["llm_api_key_set"] = bool(had_key or n_keys)
+            cfg["llm_keys_set"] = n_keys
             self._json(cfg)
         elif u.path == "/api/search":
             qs = parse_qs(u.query)
@@ -295,6 +373,8 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/api/cards":
             from . import review
             self._json({"due": review.due(), "stats": review.stats()})
+        elif u.path == "/api/metrics":
+            self._json(metrics_snapshot())
         elif u.path == "/api/tracker":
             from .tracker import summary
             self._json(summary(int(parse_qs(u.query).get("days", ["7"])[0])))
@@ -386,6 +466,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "public, max-age=86400")
             self.send_header("Content-Length", str(len(png)))
             self.end_headers()
             self.wfile.write(png)
@@ -398,6 +479,18 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
+    @staticmethod
+    def _cache_control(p) -> str:
+        """Cache class by content stability: vendored assets immutable,
+        app code/html must revalidate, derived images 1 day."""
+        try:
+            rel = p.resolve().relative_to(STATIC.resolve()).as_posix()
+        except Exception:
+            return "public, max-age=86400"  # /diagrams/, /pdfpage/ renders
+        if rel.startswith(("vendor/", "icons/")) or rel == "manifest.webmanifest":
+            return "public, max-age=31536000, immutable"
+        return "no-cache"
+
     def _file(self, p, ctype):
         try:
             body = p.read_bytes()
@@ -406,6 +499,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", self._cache_control(Path(p)))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -445,8 +539,11 @@ class Handler(BaseHTTPRequestHandler):
             from . import review
             try:
                 if str(body.get("action", "add")) == "grade":
-                    self._json({"ok": True, "card": review.grade(
-                        int(body["id"]), int(body.get("score", 4)))})
+                    res = review.grade(
+                        int(body["id"]), int(body.get("score", 4)))
+                    self._json({"ok": True,
+                                "interval": (res or {}).get("interval"),
+                                "card": res})
                 elif str(body.get("action")) == "delete":
                     ok = review.delete(body.get("id"))
                     self._json({"ok": ok, "deleted": bool(ok)}, 200 if ok else 404)
@@ -552,6 +649,7 @@ class Handler(BaseHTTPRequestHandler):
         fusion = body.get("fusion", cfg.get("fusion_method", "rrf"))
         contextual = bool(body.get("contextual", cfg.get("contextual_retrieval", False)))
         # --- Advanced retrieval with agentic follow-loop (cached) ---
+        t0 = time.time()
         try:
             from . import advanced_retrieve
             res = advanced_retrieve.advanced_search(
@@ -569,6 +667,8 @@ class Handler(BaseHTTPRequestHandler):
             method = "basic_bm25"
             loops = 1
             reranked = False
+        _metrics_inc("retrieval_latency_ms", (time.time() - t0) * 1000)
+        _metrics_inc("requests_total")
         pyq = _related_pyq(question)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -602,12 +702,132 @@ class Handler(BaseHTTPRequestHandler):
             # Stream answer via LLM provider (openai, anthropic, opencode2api, ...)
             temp = float(cfg.get("llm_temperature", 0.2))
             mgr = llm_manager(cfg)
-            for delta in mgr.chat(messages, temp, _max_tokens(cfg)):
-                send("delta", {"t": delta})
+            _metrics_inc("llm_requests_total")
+            llm_t0 = time.time()
+
+            # --- optional in-stream tool loop ({"tools": true}) -----------
+            use_tools = bool(body.get("tools", False))
+            _tools = None
+            if use_tools:
+                try:
+                    from . import tools as _tools_mod
+                    _tools = _tools_mod
+                    block = _tools.SYSTEM_PROMPT_BLOCK()
+                    if block and messages and messages[0].get("role") == "system":
+                        messages[0]["content"] += "\n\n" + block
+                except Exception:
+                    use_tools = False  # degrade silently to plain RAG chat
+
+            tool_re = re.compile(r"^TOOL\s+([a-z_]+)\s+(\{.*\})\s*$")
+            MAX_TOOL_ROUNDS = 4
+
+            def _run_marker(name, args_json):
+                """Execute one TOOL marker: emit tool + tool_result, feed back."""
+                nonlocal tool_rounds
+                tool_rounds += 1
+                tool_id = f"t{tool_rounds}"
+                try:
+                    args = json.loads(args_json)
+                    if not isinstance(args, dict):
+                        args = {}
+                except Exception:
+                    args = {}
+                send("tool", {"id": tool_id, "name": name, "args": args})
+                tt = time.time()
+                try:
+                    res_tool = _tools.execute(name, args, timeout_s=8)
+                except Exception as te:
+                    res_tool = {"ok": False, "error": f"{type(te).__name__}: {te}"}
+                if not isinstance(res_tool, dict):
+                    res_tool = {"ok": False, "error": "bad tool payload"}
+                send("tool_result", {"id": tool_id, "name": name,
+                                     "ok": bool(res_tool.get("ok", False)),
+                                     "payload": res_tool,
+                                     "ms": round((time.time() - tt) * 1000, 1)})
+                try:
+                    payload_s = json.dumps(res_tool, ensure_ascii=False)
+                except Exception:
+                    payload_s = "{}"
+                messages.append({"role": "system",
+                                 "content": (f"TOOL_RESULT {name}: {payload_s[:2048]}"
+                                             "\nUse these results when answering. Do not "
+                                             "call more tools unless another one is "
+                                             "really needed; then give your final answer.")})
+
+            tool_rounds = 0
+            idle_rounds = 0
+            last_tool_key = None
+            final_turn = False
+            final_done = False
+            delivered = False
+            while True:
+                buf = ""
+                saw_marker = False
+                had_output = False
+                try:
+                    for delta in mgr.chat(messages, temp, _max_tokens(cfg)):
+                        had_output = True
+                        delivered = True
+                        buf += delta
+                        while "\n" in buf:
+                            line, buf = buf.split("\n", 1)
+                            m = tool_re.match(line) if (use_tools and not final_turn) else None
+                            if m and tool_rounds < MAX_TOOL_ROUNDS:
+                                key = (m.group(1), m.group(2))
+                                if key == last_tool_key and tool_rounds > 0:
+                                    idle_rounds += 1
+                                else:
+                                    last_tool_key = key
+                                    saw_marker = True
+                                    _run_marker(m.group(1), m.group(2))
+                            elif m:
+                                pass  # suppress stray markers in the final turn
+                            else:
+                                send("delta", {"t": line + "\n"})
+                    if buf:
+                        m = tool_re.match(buf) if (use_tools and not final_turn) else None
+                        if m and tool_rounds < MAX_TOOL_ROUNDS:
+                            key = (m.group(1), m.group(2))
+                            if key == last_tool_key and tool_rounds > 0:
+                                idle_rounds += 1
+                            else:
+                                last_tool_key = key
+                                saw_marker = True
+                                _run_marker(m.group(1), m.group(2))
+                        elif m:
+                            pass
+                        else:
+                            send("delta", {"t": buf})
+                except SystemExit:
+                    raise
+                except Exception:
+                    if not had_output and tool_rounds == 0:
+                        raise
+                    break
+                if not use_tools:
+                    break
+                if saw_marker:
+                    idle_rounds = 0
+                    if tool_rounds >= MAX_TOOL_ROUNDS:
+                        final_turn = True
+                else:
+                    idle_rounds += 1
+                if final_turn and not final_done:
+                    final_done = True
+                    if not saw_marker:
+                        break
+                if idle_rounds >= 2:
+                    break
+            if use_tools and tool_rounds > 0 and not delivered:
+                send("delta", {"t": "(tool results could not be turned into an answer by the model)\n"})
+
+            _metrics_inc("llm_latency_ms", (time.time() - llm_t0) * 1000)
             send("done", {})
         except SystemExit:
             raise
         except Exception as e:
+            _metrics_inc("requests_errors")
+            _metrics_inc("llm_requests_errors")
             send("error", {"message": f"{type(e).__name__}: {e}"})
 
 

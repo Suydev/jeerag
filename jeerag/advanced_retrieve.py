@@ -723,9 +723,14 @@ def advanced_search(
     # --- Step 3: choose technique ---
     if mode == "rerank" or do_rerank:
         # Two-stage: BM25 recall pool → LLM cross-encoder rerank
-        result = rerank.two_stage_retrieve(
-            query, k=k, kind=kind, cfg=cfg,
-            recall_pool=cfg.get("rerank_recall_pool", 50))
+        try:
+            result = rerank.two_stage_retrieve(
+                query, k=k, kind=kind, cfg=cfg,
+                recall_pool=cfg.get("rerank_recall_pool", 50))
+        except Exception:
+            # Rerank must never kill retrieval — fall back to domain BM25.
+            result = _direct_search(query, k, kind, cfg)
+            result["method"] += "_rerank_degraded"
         result["query_variants"] = domain_variants
     elif mode == "direct":
         result = _direct_search(query, k, kind, cfg)
@@ -744,8 +749,11 @@ def advanced_search(
 
     # --- Step 3b: contextual retrieval augmentation (prepend context to chunks) ---
     if do_contextual:
-        ctx_hits = contextual_retrieval.search_with_context(
-            question, k=k, kind=kind, cfg=cfg)
+        try:
+            ctx_hits = contextual_retrieval.search_with_context(
+                query, k=k, kind=kind, cfg=cfg)
+        except Exception:
+            ctx_hits = []  # degrade: contextual is an augmentation, never fatal
         if ctx_hits:
             # Merge: contextual hits take priority, fill remaining with BM25
             seen = {(h["file"], h["page"]) for h in ctx_hits}
@@ -760,10 +768,10 @@ def advanced_search(
 
     # --- Step 4: wrap in agentic follow-loop if requested ---
     if use_loop and llm.configured(cfg):
-        loop = AgentLoop(cfg, max_loops=MAX_LOOPS, crag_enabled=do_crag)
-        return loop.run(query, k=k, kind=kind, mode=mode,
-                        rerank=do_rerank, fusion=do_fusion,
-                        contextual=do_contextual)
+        loop = AgentLoop(cfg, max_loops=MAX_LOOPS, crag_enabled=do_crag,
+                         rerank=do_rerank, fusion=do_fusion,
+                         contextual=do_contextual)
+        return loop.run(query, k=k, kind=kind, mode=mode)
 
     result.setdefault("loops", 1)
     result.setdefault("trace", [])
